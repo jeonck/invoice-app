@@ -380,6 +380,45 @@ def generate_pdf(data: dict, lang: str, currency: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# PDF preview using pdf.js (works on Streamlit Cloud / Chrome)
+# ---------------------------------------------------------------------------
+def render_pdf_preview(pdf_bytes: bytes, height: int = 800):
+    """Render PDF in-browser using pdf.js canvas rendering."""
+    import streamlit.components.v1 as components
+
+    b64 = base64.b64encode(pdf_bytes).decode()
+    html = f"""
+    <style>
+      body {{ margin:0; background:#f5f5f5; }}
+      .pdf-container {{ display:flex; flex-direction:column; align-items:center; gap:12px; padding:12px 0; }}
+      .pdf-container canvas {{ box-shadow:0 2px 8px rgba(0,0,0,0.15); background:white; max-width:100%; height:auto; }}
+    </style>
+    <div class="pdf-container" id="pdf-container"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      (async () => {{
+        const data = atob("{b64}");
+        const uint8 = new Uint8Array(data.length);
+        for (let i = 0; i < data.length; i++) uint8[i] = data.charCodeAt(i);
+        const pdf = await pdfjsLib.getDocument({{data: uint8}}).promise;
+        const container = document.getElementById('pdf-container');
+        for (let i = 1; i <= pdf.numPages; i++) {{
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({{scale: 1.5}});
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          container.appendChild(canvas);
+          await page.render({{canvasContext: canvas.getContext('2d'), viewport}}).promise;
+        }}
+      }})();
+    </script>
+    """
+    components.html(html, height=height, scrolling=True)
+
+
+# ---------------------------------------------------------------------------
 # Sample invoice data
 # ---------------------------------------------------------------------------
 def get_sample_data(lang: str, currency: str) -> dict:
@@ -500,12 +539,7 @@ with tab_sample:
 
     # Generate sample PDF automatically
     sample_pdf = generate_pdf(sample_data, lang_code, sample_currency)
-    b64_sample = base64.b64encode(sample_pdf).decode()
-    sample_iframe = (
-        f'<iframe src="data:application/pdf;base64,{b64_sample}" '
-        f'width="100%" height="800" type="application/pdf"></iframe>'
-    )
-    st.markdown(sample_iframe, unsafe_allow_html=True)
+    render_pdf_preview(sample_pdf)
 
     st.download_button(
         label=f"⬇️ {L['download']} ({L['tab_sample']})",
@@ -668,14 +702,9 @@ with tab_create:
 
             st.success("✅")
 
-            # Embed preview via iframe
-            b64 = base64.b64encode(pdf_bytes).decode()
-            pdf_display = (
-                f'<iframe src="data:application/pdf;base64,{b64}" '
-                f'width="100%" height="800" type="application/pdf"></iframe>'
-            )
+            # Render preview using pdf.js
             st.markdown(f"#### {L['preview']}")
-            st.markdown(pdf_display, unsafe_allow_html=True)
+            render_pdf_preview(pdf_bytes)
 
             # Download button
             st.download_button(
