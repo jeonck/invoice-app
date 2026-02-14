@@ -533,12 +533,10 @@ tab_sample, tab_create = st.tabs([f"📋 {L['tab_sample']}", f"✏️ {L['tab_cr
 # ===== TAB 1: Sample Invoice =====
 with tab_sample:
     st.info(L["sample_desc"])
-    sample_currency = "KRW" if lang_code == "ko" else "USD"
-    sample_data = get_sample_data(lang_code, sample_currency)
-    sample_sym = CURRENCY_SYMBOLS[sample_currency]
+    sample_data = get_sample_data("en", "USD")
 
     # Generate sample PDF automatically
-    sample_pdf = generate_pdf(sample_data, lang_code, sample_currency)
+    sample_pdf = generate_pdf(sample_data, "en", "USD")
     render_pdf_preview(sample_pdf)
 
     st.download_button(
