@@ -2,6 +2,8 @@ import streamlit as st
 import base64
 import os
 import uuid
+import urllib.request
+import zipfile
 from io import BytesIO
 from datetime import date, timedelta
 
@@ -22,6 +24,29 @@ _KO_FONT_NAME = "Helvetica"  # fallback
 _KO_FONT_NAME_BOLD = "Helvetica-Bold"
 
 
+def _download_nanum_font(dest_dir: str) -> bool:
+    """Download NanumGothic font from Google Fonts if not already cached."""
+    regular = os.path.join(dest_dir, "NanumGothic-Regular.ttf")
+    bold = os.path.join(dest_dir, "NanumGothic-Bold.ttf")
+    if os.path.exists(regular):
+        return True
+
+    url = "https://fonts.google.com/download?family=Nanum+Gothic"
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        resp = urllib.request.urlopen(url, timeout=30)
+        zip_data = BytesIO(resp.read())
+        with zipfile.ZipFile(zip_data) as zf:
+            for name in zf.namelist():
+                basename = os.path.basename(name)
+                if basename.endswith(".ttf"):
+                    with open(os.path.join(dest_dir, basename), "wb") as f:
+                        f.write(zf.read(name))
+        return os.path.exists(regular)
+    except Exception:
+        return False
+
+
 def _register_korean_font():
     """Register a Korean-capable font for reportlab."""
     global _FONT_REGISTERED, _KO_FONT_NAME, _KO_FONT_NAME_BOLD
@@ -32,51 +57,57 @@ def _register_korean_font():
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    # Candidate Korean font paths (macOS / Linux common locations)
+    # Font cache directory (works on both local and Streamlit Cloud)
+    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "invoice-app-fonts")
+
+    # Candidate Korean font paths (macOS / Linux / cached)
     candidates = [
+        (os.path.join(cache_dir, "NanumGothic-Regular.ttf"),
+         os.path.join(cache_dir, "NanumGothic-Bold.ttf")),
         # macOS system fonts
-        "/System/Library/Fonts/Supplemental/AppleSDGothicNeo.ttc",
-        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-        "/Library/Fonts/NanumGothic.ttf",
-        "/Library/Fonts/NanumGothicBold.ttf",
+        ("/System/Library/Fonts/Supplemental/AppleSDGothicNeo.ttc", None),
+        ("/System/Library/Fonts/AppleSDGothicNeo.ttc", None),
+        ("/Library/Fonts/NanumGothic.ttf", "/Library/Fonts/NanumGothicBold.ttf"),
         # Linux common
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-        "/usr/share/fonts/nanum/NanumGothic.ttf",
+        ("/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+         "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
     ]
 
-    # Also try NanumGothic from user home (downloaded at runtime)
-    home = os.path.expanduser("~")
-    local_font = os.path.join(home, ".fonts", "NanumGothic.ttf")
-    local_font_bold = os.path.join(home, ".fonts", "NanumGothicBold.ttf")
-    candidates.insert(0, local_font)
-
-    for path in candidates:
-        if os.path.exists(path):
+    def _try_register(regular_path, bold_path):
+        if not os.path.exists(regular_path):
+            return False
+        try:
+            pdfmetrics.registerFont(TTFont("KoreanFont", regular_path))
+        except Exception:
+            return False
+        global _KO_FONT_NAME, _KO_FONT_NAME_BOLD
+        _KO_FONT_NAME = "KoreanFont"
+        if bold_path and os.path.exists(bold_path):
             try:
-                pdfmetrics.registerFont(TTFont("KoreanFont", path))
-                _KO_FONT_NAME = "KoreanFont"
-                # Try bold variant
-                bold_path = path.replace("NanumGothic.ttf", "NanumGothicBold.ttf")
-                if bold_path != path and os.path.exists(bold_path):
-                    pdfmetrics.registerFont(TTFont("KoreanFontBold", bold_path))
-                    _KO_FONT_NAME_BOLD = "KoreanFontBold"
-                else:
-                    _KO_FONT_NAME_BOLD = "KoreanFont"
-                _FONT_REGISTERED = True
-                return
+                pdfmetrics.registerFont(TTFont("KoreanFontBold", bold_path))
+                _KO_FONT_NAME_BOLD = "KoreanFontBold"
             except Exception:
-                continue
+                _KO_FONT_NAME_BOLD = "KoreanFont"
+        else:
+            _KO_FONT_NAME_BOLD = "KoreanFont"
+        return True
 
-    # Fallback: try CID font for Korean
-    try:
-        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-        pdfmetrics.registerFont(UnicodeCIDFont("HYSMyeongJo-Medium"))
-        _KO_FONT_NAME = "HYSMyeongJo-Medium"
-        _KO_FONT_NAME_BOLD = "HYSMyeongJo-Medium"
-        _FONT_REGISTERED = True
-    except Exception:
-        # Final fallback — Helvetica (Korean glyphs will be missing)
-        _FONT_REGISTERED = True
+    # Try existing font paths first
+    for regular, bold in candidates:
+        if _try_register(regular, bold):
+            _FONT_REGISTERED = True
+            return
+
+    # No local font found — download NanumGothic from Google Fonts
+    if _download_nanum_font(cache_dir):
+        regular = os.path.join(cache_dir, "NanumGothic-Regular.ttf")
+        bold = os.path.join(cache_dir, "NanumGothic-Bold.ttf")
+        if _try_register(regular, bold):
+            _FONT_REGISTERED = True
+            return
+
+    # Final fallback — Helvetica (Korean glyphs will be missing)
+    _FONT_REGISTERED = True
 
 
 # ---------------------------------------------------------------------------
