@@ -2,8 +2,8 @@ import streamlit as st
 import base64
 import os
 import uuid
+import re
 import urllib.request
-import zipfile
 from io import BytesIO
 from datetime import date, timedelta
 
@@ -17,97 +17,131 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
 # ---------------------------------------------------------------------------
-# 한글 폰트 등록 (런타임)
+# 한글 폰트 등록
+#
+# The font is bundled in fonts/ so Korean always renders, even with no
+# network (Streamlit Cloud blocked the old Google Fonts download, which
+# silently fell back to Helvetica and printed Korean as empty boxes).
 # ---------------------------------------------------------------------------
 _FONT_REGISTERED = False
 _KO_FONT_NAME = "Helvetica"  # fallback
 _KO_FONT_NAME_BOLD = "Helvetica-Bold"
+_KO_FONT_OK = False  # True once a Korean-capable font is registered
+
+_BUNDLED_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+_FONT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "invoice-app-fonts")
+
+# Raw files from the google/fonts repository (OFL). Used only when the
+# bundled copy is missing, e.g. someone dropped app.py somewhere on its own.
+_FONT_URLS = {
+    "NanumGothic-Regular.ttf":
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/"
+        "NanumGothic-Regular.ttf",
+    "NanumGothic-Bold.ttf":
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/"
+        "NanumGothic-Bold.ttf",
+}
+
+_HANGUL_RE = re.compile(r"[\uac00-\ud7a3\u3130-\u318f]")
 
 
 def _download_nanum_font(dest_dir: str) -> bool:
-    """Download NanumGothic font from Google Fonts if not already cached."""
+    """Fetch NanumGothic into dest_dir. Returns True if the regular face is there."""
     regular = os.path.join(dest_dir, "NanumGothic-Regular.ttf")
-    bold = os.path.join(dest_dir, "NanumGothic-Bold.ttf")
     if os.path.exists(regular):
         return True
-
-    url = "https://fonts.google.com/download?family=Nanum+Gothic"
     try:
         os.makedirs(dest_dir, exist_ok=True)
-        resp = urllib.request.urlopen(url, timeout=30)
-        zip_data = BytesIO(resp.read())
-        with zipfile.ZipFile(zip_data) as zf:
-            for name in zf.namelist():
-                basename = os.path.basename(name)
-                if basename.endswith(".ttf"):
-                    with open(os.path.join(dest_dir, basename), "wb") as f:
-                        f.write(zf.read(name))
-        return os.path.exists(regular)
+        for filename, url in _FONT_URLS.items():
+            target = os.path.join(dest_dir, filename)
+            if os.path.exists(target):
+                continue
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                data = resp.read()
+            # A TTF starts with 0x00010000 or "true"; anything else is an
+            # error page, and writing it would poison the cache.
+            if not data[:4] in (b"\x00\x01\x00\x00", b"true", b"ttcf"):
+                continue
+            with open(target, "wb") as f:
+                f.write(data)
     except Exception:
-        return False
+        pass
+    return os.path.exists(regular)
 
 
 def _register_korean_font():
-    """Register a Korean-capable font for reportlab."""
-    global _FONT_REGISTERED, _KO_FONT_NAME, _KO_FONT_NAME_BOLD
+    """Register a Korean-capable font for reportlab. Safe to call repeatedly."""
+    global _FONT_REGISTERED, _KO_FONT_NAME, _KO_FONT_NAME_BOLD, _KO_FONT_OK
 
     if _FONT_REGISTERED:
-        return
+        return _KO_FONT_OK
 
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    # Font cache directory (works on both local and Streamlit Cloud)
-    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "invoice-app-fonts")
-
-    # Candidate Korean font paths (macOS / Linux / cached)
-    candidates = [
-        (os.path.join(cache_dir, "NanumGothic-Regular.ttf"),
-         os.path.join(cache_dir, "NanumGothic-Bold.ttf")),
-        # macOS system fonts
-        ("/System/Library/Fonts/Supplemental/AppleSDGothicNeo.ttc", None),
-        ("/System/Library/Fonts/AppleSDGothicNeo.ttc", None),
-        ("/Library/Fonts/NanumGothic.ttf", "/Library/Fonts/NanumGothicBold.ttf"),
-        # Linux common
-        ("/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-         "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
-    ]
-
     def _try_register(regular_path, bold_path):
-        if not os.path.exists(regular_path):
+        global _KO_FONT_NAME, _KO_FONT_NAME_BOLD
+        if not regular_path or not os.path.exists(regular_path):
             return False
         try:
             pdfmetrics.registerFont(TTFont("KoreanFont", regular_path))
         except Exception:
             return False
-        global _KO_FONT_NAME, _KO_FONT_NAME_BOLD
         _KO_FONT_NAME = "KoreanFont"
+        _KO_FONT_NAME_BOLD = "KoreanFont"
         if bold_path and os.path.exists(bold_path):
             try:
                 pdfmetrics.registerFont(TTFont("KoreanFontBold", bold_path))
                 _KO_FONT_NAME_BOLD = "KoreanFontBold"
             except Exception:
-                _KO_FONT_NAME_BOLD = "KoreanFont"
-        else:
-            _KO_FONT_NAME_BOLD = "KoreanFont"
+                pass
         return True
 
-    # Try existing font paths first
+    candidates = [
+        # Bundled with the app — the path that always works.
+        (os.path.join(_BUNDLED_FONT_DIR, "NanumGothic-Regular.ttf"),
+         os.path.join(_BUNDLED_FONT_DIR, "NanumGothic-Bold.ttf")),
+        # Previously downloaded copy.
+        (os.path.join(_FONT_CACHE_DIR, "NanumGothic-Regular.ttf"),
+         os.path.join(_FONT_CACHE_DIR, "NanumGothic-Bold.ttf")),
+        # Common system installs (.ttc is skipped: reportlab needs a face index).
+        ("/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+         "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
+        ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttf",
+         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttf"),
+        ("/Library/Fonts/NanumGothic.ttf", "/Library/Fonts/NanumGothicBold.ttf"),
+    ]
+
     for regular, bold in candidates:
         if _try_register(regular, bold):
             _FONT_REGISTERED = True
-            return
+            _KO_FONT_OK = True
+            return True
 
-    # No local font found — download NanumGothic from Google Fonts
-    if _download_nanum_font(cache_dir):
-        regular = os.path.join(cache_dir, "NanumGothic-Regular.ttf")
-        bold = os.path.join(cache_dir, "NanumGothic-Bold.ttf")
-        if _try_register(regular, bold):
+    # Nothing local — try the network once.
+    if _download_nanum_font(_FONT_CACHE_DIR):
+        if _try_register(os.path.join(_FONT_CACHE_DIR, "NanumGothic-Regular.ttf"),
+                         os.path.join(_FONT_CACHE_DIR, "NanumGothic-Bold.ttf")):
             _FONT_REGISTERED = True
-            return
+            _KO_FONT_OK = True
+            return True
 
-    # Final fallback — Helvetica (Korean glyphs will be missing)
+    # Final fallback — Helvetica. Korean glyphs will be missing, and the UI
+    # says so rather than handing over a PDF full of empty boxes.
     _FONT_REGISTERED = True
+    _KO_FONT_OK = False
+    return False
+
+
+def _has_hangul(value) -> bool:
+    """True if any Korean character appears anywhere in the invoice data."""
+    if isinstance(value, str):
+        return bool(_HANGUL_RE.search(value))
+    if isinstance(value, dict):
+        return any(_has_hangul(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_has_hangul(v) for v in value)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +200,7 @@ LABELS = {
         "form_hint": "아래 양식은 완성될 PDF 인보이스와 같은 순서·배치로 구성되어 있습니다. 입력하는 대로 문서가 만들어집니다.",
         "doc_caption": "아래 항목을 채우면 그대로 PDF 인보이스가 됩니다. * 는 필수 항목입니다.",
         "generated": "인보이스가 생성되었습니다.",
+        "font_warning": "한글 폰트를 불러오지 못했습니다. PDF의 한글이 네모로 표시될 수 있습니다. fonts/NanumGothic-Regular.ttf 파일이 저장소에 포함되어 있는지 확인하세요.",
         "ph_from_company": "우리 회사 이름",
         "ph_to_company": "청구할 거래처 이름",
         "ph_bizno": "123-45-67890",
@@ -229,6 +264,7 @@ LABELS = {
         "form_hint": "The form below follows the exact order and layout of the PDF invoice it produces — what you type is what you get.",
         "doc_caption": "Fill in the fields below and they become your PDF invoice. * marks required fields.",
         "generated": "Invoice generated.",
+        "font_warning": "The Korean font could not be loaded, so Korean text may appear as empty boxes in the PDF. Check that fonts/NanumGothic-Regular.ttf is present in the repository.",
         "ph_from_company": "Your company name",
         "ph_to_company": "Client company name",
         "ph_bizno": "EIN 00-0000000",
@@ -261,7 +297,7 @@ def fmt_money(value: float, symbol: str) -> str:
 # PDF generation
 # ---------------------------------------------------------------------------
 def generate_pdf(data: dict, lang: str, currency: str) -> bytes:
-    _register_korean_font()
+    font_ok = _register_korean_font()
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -273,8 +309,11 @@ def generate_pdf(data: dict, lang: str, currency: str) -> bytes:
     L = LABELS[lang]
     sym = CURRENCY_SYMBOLS[currency]
 
-    # Choose font based on language
-    if lang == "ko":
+    # Helvetica has neither Hangul nor the won sign, so switch to the
+    # embedded font whenever either can show up — an English invoice billed
+    # in KRW, or an English UI with a Korean company name typed into it.
+    needs_unicode = lang == "ko" or sym == "\u20a9" or _has_hangul(data)
+    if needs_unicode and font_ok:
         fn = _KO_FONT_NAME
         fn_bold = _KO_FONT_NAME_BOLD
     else:
@@ -356,7 +395,8 @@ def generate_pdf(data: dict, lang: str, currency: str) -> bytes:
             Paragraph(fmt_money(item["amount"], sym), s_normal_r),
         ])
 
-    col_w = [8 * mm, doc.width - 68 * mm, 15 * mm, 22 * mm, 23 * mm]
+    # Wide enough for KRW totals like \u20a912,000,000 without wrapping.
+    col_w = [8 * mm, doc.width - 78 * mm, 14 * mm, 28 * mm, 28 * mm]
     items_table = Table(item_rows, colWidths=col_w, repeatRows=1)
     items_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4472C4")),
@@ -464,11 +504,11 @@ def get_sample_data(lang: str, currency: str) -> dict:
     today = date.today()
     if lang == "ko":
         items = [
-            {"name": "UI/UX Design - Mobile App", "qty": 1, "unit_price": 5000000, "amount": 5000000},
-            {"name": "Frontend Development (React Native)", "qty": 1, "unit_price": 12000000, "amount": 12000000},
-            {"name": "Backend API Development", "qty": 1, "unit_price": 8000000, "amount": 8000000},
-            {"name": "QA Testing & Bug Fix", "qty": 40, "unit_price": 150000, "amount": 6000000},
-            {"name": "Project Management", "qty": 3, "unit_price": 1000000, "amount": 3000000},
+            {"name": "모바일 앱 UI/UX 디자인", "qty": 1, "unit_price": 5000000, "amount": 5000000},
+            {"name": "프론트엔드 개발 (React Native)", "qty": 1, "unit_price": 12000000, "amount": 12000000},
+            {"name": "백엔드 API 개발", "qty": 1, "unit_price": 8000000, "amount": 8000000},
+            {"name": "QA 테스트 및 버그 수정 (시간당)", "qty": 40, "unit_price": 150000, "amount": 6000000},
+            {"name": "프로젝트 관리 (월단위)", "qty": 3, "unit_price": 1000000, "amount": 3000000},
         ]
         subtotal = sum(it["amount"] for it in items)
         tax_rate = 10.0
@@ -478,16 +518,16 @@ def get_sample_data(lang: str, currency: str) -> dict:
             "issue_date": str(today),
             "due_date": str(today + timedelta(days=30)),
             "from": {
-                "company": "BluePrint Studios",
+                "company": "블루프린트 스튜디오",
                 "business_no": "124-86-12345",
-                "address": "Seoul, Gangnam-gu, Teheran-ro 152, 8F",
+                "address": "서울시 강남구 테헤란로 152, 8층",
                 "email": "billing@blueprint.kr",
                 "phone": "02-555-1234",
             },
             "to": {
-                "company": "GreenField Corp.",
+                "company": "그린필드 주식회사",
                 "business_no": "210-81-67890",
-                "address": "Seoul, Seocho-gu, Seocho-daero 321, 12F",
+                "address": "서울시 서초구 서초대로 321, 12층",
                 "email": "accounts@greenfield.co.kr",
                 "phone": "02-333-5678",
             },
@@ -497,11 +537,11 @@ def get_sample_data(lang: str, currency: str) -> dict:
             "tax": tax,
             "total": subtotal + tax,
             "payment": {
-                "bank": "Shinhan Bank",
+                "bank": "신한은행",
                 "account_no": "110-432-789012",
-                "holder": "BluePrint Studios",
+                "holder": "블루프린트 스튜디오",
             },
-            "notes": "30 days payment. 50% deposit paid upon contract signing (INV-20260110-A01).\nBalance due upon project delivery and acceptance.",
+            "notes": "결제기한은 발행일로부터 30일입니다.\n계약 시 선금 50%가 지급되었습니다 (INV-20260110-A01).\n잔금은 프로젝트 납품 및 검수 완료 후 청구됩니다.",
         }
     else:
         items = [
@@ -615,7 +655,7 @@ def reset_form():
 
 def load_sample_into_form(ds_lang: str):
     """Callback: fill every field with the sample invoice content."""
-    data = get_sample_data(ds_lang, "USD")
+    data = get_sample_data(ds_lang, st.session_state.get("currency_select", "KRW"))
     ss = st.session_state
     init_form_state()
 
@@ -772,6 +812,13 @@ with st.sidebar:
 st.title(f"📄 {L['title']}")
 st.caption(L["subtitle"])
 
+# KRW amounts belong with the Korean sample; every other currency gets the
+# international one, whatever the UI language is.
+sample_dataset = "ko" if currency == "KRW" else "en"
+
+if (lang_code == "ko" or currency == "KRW") and not _register_korean_font():
+    st.warning(L["font_warning"])
+
 init_form_state()
 
 # --- Tabs ---
@@ -782,13 +829,13 @@ with tab_sample:
     st.info(L["sample_desc"])
 
     st.button(f"📋 {L['use_sample']}", key="use_sample_btn",
-              on_click=load_sample_into_form, args=("en",),
+              on_click=load_sample_into_form, args=(sample_dataset,),
               help=L["use_sample_help"])
 
-    sample_data = get_sample_data("en", "USD")
+    sample_data = get_sample_data(sample_dataset, currency)
 
-    # Generate sample PDF automatically
-    sample_pdf = generate_pdf(sample_data, "en", "USD")
+    # Generate sample PDF automatically, in the language now selected.
+    sample_pdf = generate_pdf(sample_data, lang_code, currency)
     render_pdf_preview(sample_pdf)
 
     st.download_button(
@@ -811,8 +858,7 @@ with tab_create:
     tb1, tb2, tb3 = st.columns([1.1, 1, 3.4], vertical_alignment="center")
     with tb1:
         st.button(f"📋 {L['load_sample']}", key="load_sample_btn",
-                  on_click=load_sample_into_form,
-                  args=("ko" if currency == "KRW" else "en",),
+                  on_click=load_sample_into_form, args=(sample_dataset,),
                   use_container_width=True)
     with tb2:
         st.button(f"🧹 {L['clear_all']}", key="clear_form_btn",
