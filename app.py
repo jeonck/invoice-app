@@ -157,6 +157,25 @@ LABELS = {
         "tab_sample": "샘플 인보이스",
         "tab_create": "인보이스 작성",
         "sample_desc": "현실적인 샘플 인보이스입니다. 참고하여 직접 작성해 보세요.",
+        "use_sample": "이 샘플 내용으로 작성 시작",
+        "use_sample_help": "샘플 내용이 '인보이스 작성' 탭에 그대로 채워집니다.",
+        "load_sample": "샘플 채우기",
+        "clear_all": "전체 지우기",
+        "sample_loaded": "샘플 내용을 채웠습니다. 값을 자유롭게 수정하세요.",
+        "form_cleared": "입력 내용을 모두 지웠습니다.",
+        "form_hint": "아래 양식은 완성될 PDF 인보이스와 같은 순서·배치로 구성되어 있습니다. 입력하는 대로 문서가 만들어집니다.",
+        "doc_caption": "아래 항목을 채우면 그대로 PDF 인보이스가 됩니다. * 는 필수 항목입니다.",
+        "generated": "인보이스가 생성되었습니다.",
+        "ph_from_company": "우리 회사 이름",
+        "ph_to_company": "청구할 거래처 이름",
+        "ph_bizno": "123-45-67890",
+        "ph_address": "서울시 강남구 테헤란로 152, 8층",
+        "ph_email": "billing@example.com",
+        "ph_phone": "02-000-0000",
+        "ph_item": "품목 또는 서비스 내용",
+        "ph_bank": "신한은행",
+        "ph_account_no": "110-000-000000",
+        "ph_holder": "예금주명",
     },
     "en": {
         "page_title": "Invoice Generator",
@@ -201,6 +220,25 @@ LABELS = {
         "tab_sample": "Sample Invoice",
         "tab_create": "Create Invoice",
         "sample_desc": "A realistic sample invoice for reference. Use it as a guide to create your own.",
+        "use_sample": "Start from this sample",
+        "use_sample_help": "Fills the 'Create Invoice' tab with this sample content.",
+        "load_sample": "Fill sample",
+        "clear_all": "Clear all",
+        "sample_loaded": "Sample content loaded. Edit any field freely.",
+        "form_cleared": "All fields cleared.",
+        "form_hint": "The form below follows the exact order and layout of the PDF invoice it produces — what you type is what you get.",
+        "doc_caption": "Fill in the fields below and they become your PDF invoice. * marks required fields.",
+        "generated": "Invoice generated.",
+        "ph_from_company": "Your company name",
+        "ph_to_company": "Client company name",
+        "ph_bizno": "EIN 00-0000000",
+        "ph_address": "350 Fifth Avenue, Suite 4210, New York, NY 10118",
+        "ph_email": "billing@example.com",
+        "ph_phone": "+1 (000) 000-0000",
+        "ph_item": "Item or service description",
+        "ph_bank": "Chase Bank",
+        "ph_account_no": "Routing / Account number",
+        "ph_holder": "Account holder name",
     },
 }
 
@@ -509,9 +547,216 @@ def get_sample_data(lang: str, currency: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Document-style form helpers
+# ---------------------------------------------------------------------------
+FORM_TEXT_KEYS = (
+    "invoice_no",
+    "from_company", "from_bizno", "from_addr", "from_email", "from_phone",
+    "to_company", "to_bizno", "to_addr", "to_email", "to_phone",
+    "bank_name", "account_no", "account_holder", "notes",
+)
+
+
+def _item_key(row_id: int, field: str) -> str:
+    return f"item_{field}_{row_id}"
+
+
+def _next_row_id() -> int:
+    st.session_state.item_seq = st.session_state.get("item_seq", 0) + 1
+    return st.session_state.item_seq
+
+
+def _add_row(name: str = "", qty: int = 1, price: float = 0.0) -> int:
+    row_id = _next_row_id()
+    st.session_state.item_ids.append(row_id)
+    st.session_state[_item_key(row_id, "name")] = name
+    st.session_state[_item_key(row_id, "qty")] = int(qty)
+    st.session_state[_item_key(row_id, "price")] = float(price)
+    return row_id
+
+
+def _drop_rows():
+    """Remove every item row and its widget state."""
+    for row_id in st.session_state.get("item_ids", []):
+        for field in ("name", "qty", "price"):
+            st.session_state.pop(_item_key(row_id, field), None)
+    st.session_state.item_ids = []
+
+
+def init_form_state():
+    """Seed default values so every widget can be driven by session state."""
+    ss = st.session_state
+    if ss.get("form_ready"):
+        return
+    ss.item_seq = 0
+    ss.item_ids = []
+    for _ in range(3):
+        _add_row()
+    ss.invoice_no = f"INV-{date.today().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    for key in FORM_TEXT_KEYS:
+        ss.setdefault(key, "")
+    ss.issue_date = date.today()
+    ss.due_date = date.today() + timedelta(days=30)
+    ss.tax_rate = 10.0
+    ss.form_ready = True
+
+
+def reset_form():
+    """Callback: wipe the form back to an empty invoice."""
+    _drop_rows()
+    for key in FORM_TEXT_KEYS:
+        st.session_state.pop(key, None)
+    for key in ("issue_date", "due_date", "tax_rate", "form_ready",
+                "pdf_bytes", "pdf_name", "form_notice"):
+        st.session_state.pop(key, None)
+    init_form_state()
+    st.session_state.form_notice = "cleared"
+
+
+def load_sample_into_form(ds_lang: str):
+    """Callback: fill every field with the sample invoice content."""
+    data = get_sample_data(ds_lang, "USD")
+    ss = st.session_state
+    init_form_state()
+
+    _drop_rows()
+    for item in data["items"]:
+        _add_row(item["name"], item["qty"], item["unit_price"])
+
+    ss.invoice_no = data["invoice_no"]
+    ss.issue_date = date.fromisoformat(data["issue_date"])
+    ss.due_date = date.fromisoformat(data["due_date"])
+    for side, prefix in (("from", "from"), ("to", "to")):
+        party = data[side]
+        ss[f"{prefix}_company"] = party["company"]
+        ss[f"{prefix}_bizno"] = party["business_no"]
+        ss[f"{prefix}_addr"] = party["address"]
+        ss[f"{prefix}_email"] = party["email"]
+        ss[f"{prefix}_phone"] = party["phone"]
+    ss.tax_rate = float(data["tax_rate"])
+    ss.bank_name = data["payment"]["bank"]
+    ss.account_no = data["payment"]["account_no"]
+    ss.account_holder = data["payment"]["holder"]
+    ss.notes = data["notes"]
+    ss.pop("pdf_bytes", None)
+    ss.pop("pdf_name", None)
+    ss.form_notice = "sample_loaded"
+
+
+def append_row():
+    """Callback: add one empty item row."""
+    _add_row()
+
+
+def remove_row(row_id: int):
+    """Callback: drop a single item row."""
+    if len(st.session_state.item_ids) <= 1:
+        return
+    st.session_state.item_ids.remove(row_id)
+    for field in ("name", "qty", "price"):
+        st.session_state.pop(_item_key(row_id, field), None)
+
+
+FORM_CSS = """
+<style>
+  .inv-doc-title {
+    text-align: center;
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: 6px;
+    margin: 4px 0 2px 0;
+  }
+  .inv-doc-caption {
+    text-align: center;
+    font-size: 12px;
+    opacity: 0.6;
+    margin-bottom: 14px;
+  }
+  .inv-rule {
+    border-top: 1px solid rgba(128, 128, 128, 0.28);
+    margin: 14px 0 12px 0;
+  }
+  .inv-party-head {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 6px 10px;
+    border-left: 4px solid #4472C4;
+    background: rgba(68, 114, 196, 0.10);
+    border-radius: 3px;
+    margin-bottom: 8px;
+  }
+  .inv-party-head.to { border-left-color: #8FAADC; background: rgba(143, 170, 220, 0.14); }
+  .inv-section {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin: 4px 0 8px 0;
+  }
+  .inv-th {
+    background: #4472C4;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 7px 10px;
+    border-radius: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .inv-th.r { text-align: right; }
+  .inv-th.c { text-align: center; }
+  .inv-th-blank {
+    padding: 7px 0;
+    font-size: 12px;
+  }
+  .inv-idx {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0.65;
+  }
+  .inv-amt {
+    text-align: right;
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 0 2px;
+    line-height: 1.2;
+  }
+  .inv-total-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    font-size: 14px;
+    padding: 6px 2px;
+    border-top: 1px solid rgba(128, 128, 128, 0.28);
+    font-variant-numeric: tabular-nums;
+  }
+  .inv-total-row.grand {
+    font-size: 19px;
+    font-weight: 800;
+    border-top: 2px solid #4472C4;
+    padding-top: 10px;
+  }
+  .inv-total-row .label { opacity: 0.75; }
+  .inv-total-row.grand .label { opacity: 1; }
+  .inv-footer {
+    text-align: center;
+    font-size: 12px;
+    opacity: 0.55;
+    margin-top: 18px;
+  }
+  .inv-req { color: #d9534f; font-weight: 700; }
+</style>
+"""
+
+
+# ---------------------------------------------------------------------------
 # Streamlit UI
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="Invoice Generator", page_icon="📄", layout="wide")
+st.markdown(FORM_CSS, unsafe_allow_html=True)
 
 # --- Sidebar ---
 with st.sidebar:
@@ -527,12 +772,19 @@ with st.sidebar:
 st.title(f"📄 {L['title']}")
 st.caption(L["subtitle"])
 
+init_form_state()
+
 # --- Tabs ---
 tab_sample, tab_create = st.tabs([f"📋 {L['tab_sample']}", f"✏️ {L['tab_create']}"])
 
 # ===== TAB 1: Sample Invoice =====
 with tab_sample:
     st.info(L["sample_desc"])
+
+    st.button(f"📋 {L['use_sample']}", key="use_sample_btn",
+              on_click=load_sample_into_form, args=("en",),
+              help=L["use_sample_help"])
+
     sample_data = get_sample_data("en", "USD")
 
     # Generate sample PDF automatically
@@ -549,165 +801,233 @@ with tab_sample:
 
 # ===== TAB 2: Create Invoice =====
 with tab_create:
-    # --- Invoice Meta ---
-    st.subheader(L["invoice_info"])
-    mc1, mc2, mc3 = st.columns(3)
-    with mc1:
-        default_inv_no = f"INV-{date.today().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-        invoice_no = st.text_input(L["invoice_no"], value=default_inv_no)
-    with mc2:
-        issue_date = st.date_input(L["issue_date"], value=date.today())
-    with mc3:
-        due_date = st.date_input(L["due_date"], value=date.today() + timedelta(days=30))
+    notice = st.session_state.pop("form_notice", None)
+    if notice == "sample_loaded":
+        st.success(f"✅ {L['sample_loaded']}")
+    elif notice == "cleared":
+        st.info(f"🧹 {L['form_cleared']}")
 
-    # --- From ---
-    st.subheader(L["from_title"])
-    fc1, fc2 = st.columns(2)
-    with fc1:
-        from_company = st.text_input(L["company"], key="from_company")
-        from_bizno = st.text_input(L["business_no"], key="from_bizno")
-        from_address = st.text_input(L["address"], key="from_addr")
-    with fc2:
-        from_email = st.text_input(L["email"], key="from_email")
-        from_phone = st.text_input(L["phone"], key="from_phone")
+    # --- Toolbar (mirrors nothing in the PDF, kept above the document) ---
+    tb1, tb2, tb3 = st.columns([1.1, 1, 3.4], vertical_alignment="center")
+    with tb1:
+        st.button(f"📋 {L['load_sample']}", key="load_sample_btn",
+                  on_click=load_sample_into_form,
+                  args=("ko" if currency == "KRW" else "en",),
+                  use_container_width=True)
+    with tb2:
+        st.button(f"🧹 {L['clear_all']}", key="clear_form_btn",
+                  on_click=reset_form, use_container_width=True)
+    with tb3:
+        st.caption(L["form_hint"])
 
-    # --- To ---
-    st.subheader(L["to_title"])
-    tc1, tc2 = st.columns(2)
-    with tc1:
-        to_company = st.text_input(L["company"], key="to_company")
-        to_bizno = st.text_input(L["business_no"], key="to_bizno")
-        to_address = st.text_input(L["address"], key="to_addr")
-    with tc2:
-        to_email = st.text_input(L["email"], key="to_email")
-        to_phone = st.text_input(L["phone"], key="to_phone")
+    # ================= The invoice document =================
+    with st.container(border=True):
+        st.markdown(f'<div class="inv-doc-title">{L["pdf_header"]}</div>',
+                    unsafe_allow_html=True)
+        st.markdown(f'<div class="inv-doc-caption">{L["doc_caption"]}</div>',
+                    unsafe_allow_html=True)
 
-    # --- Items ---
-    st.subheader(L["items_title"])
+        # --- Invoice meta (same row order as the PDF header) ---
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            invoice_no = st.text_input(L["invoice_no"], key="invoice_no")
+        with mc2:
+            issue_date = st.date_input(L["issue_date"], key="issue_date")
+        with mc3:
+            due_date = st.date_input(L["due_date"], key="due_date")
 
-    if "item_count" not in st.session_state:
-        st.session_state.item_count = 1
+        st.markdown('<div class="inv-rule"></div>', unsafe_allow_html=True)
 
-    items = []
-    subtotal = 0.0
+        # --- From / To side by side, exactly like the PDF ---
+        fc, tc = st.columns(2)
+        with fc:
+            st.markdown(
+                f'<div class="inv-party-head">{L["from_title"]}'
+                f' <span class="inv-req">*</span></div>',
+                unsafe_allow_html=True)
+            from_company = st.text_input(L["company"], key="from_company",
+                                         placeholder=L["ph_from_company"])
+            from_bizno = st.text_input(L["business_no"], key="from_bizno",
+                                       placeholder=L["ph_bizno"])
+            from_address = st.text_input(L["address"], key="from_addr",
+                                         placeholder=L["ph_address"])
+            from_email = st.text_input(L["email"], key="from_email",
+                                       placeholder=L["ph_email"])
+            from_phone = st.text_input(L["phone"], key="from_phone",
+                                       placeholder=L["ph_phone"])
+        with tc:
+            st.markdown(
+                f'<div class="inv-party-head to">{L["to_title"]}'
+                f' <span class="inv-req">*</span></div>',
+                unsafe_allow_html=True)
+            to_company = st.text_input(L["company"], key="to_company",
+                                       placeholder=L["ph_to_company"])
+            to_bizno = st.text_input(L["business_no"], key="to_bizno",
+                                     placeholder=L["ph_bizno"])
+            to_address = st.text_input(L["address"], key="to_addr",
+                                       placeholder=L["ph_address"])
+            to_email = st.text_input(L["email"], key="to_email",
+                                     placeholder=L["ph_email"])
+            to_phone = st.text_input(L["phone"], key="to_phone",
+                                     placeholder=L["ph_phone"])
 
-    for i in range(st.session_state.item_count):
-        ic1, ic2, ic3, ic4, ic5 = st.columns([4, 1, 2, 2, 0.5])
-        with ic1:
-            name = st.text_input(L["item_name"], key=f"item_name_{i}",
-                                  label_visibility="visible" if i == 0 else "collapsed",
-                                  placeholder=L["item_name"])
-        with ic2:
-            qty = st.number_input(L["qty"], min_value=1, value=1, key=f"item_qty_{i}",
-                                  label_visibility="visible" if i == 0 else "collapsed")
-        with ic3:
-            unit_price = st.number_input(L["unit_price"], min_value=0.0, value=0.0,
-                                         step=1.0, key=f"item_price_{i}",
-                                         label_visibility="visible" if i == 0 else "collapsed")
-        with ic4:
+        st.markdown('<div class="inv-rule"></div>', unsafe_allow_html=True)
+
+        # --- Items, laid out as the PDF table ---
+        st.markdown(
+            f'<div class="inv-section">{L["items_title"]}'
+            f' <span class="inv-req">*</span></div>',
+            unsafe_allow_html=True)
+
+        # Whole-unit currencies have no cents, so don't show any.
+        whole_unit = sym in ("\u20a9", "\u00a5")
+        price_fmt = "%.0f" if whole_unit else "%.2f"
+        price_step = 1000.0 if whole_unit else 1.0
+
+        ITEM_COLS = [0.5, 4.6, 1.2, 2.0, 2.0, 0.6]
+        h = st.columns(ITEM_COLS, gap="small", vertical_alignment="center")
+        h[0].markdown('<div class="inv-th c">#</div>', unsafe_allow_html=True)
+        h[1].markdown(f'<div class="inv-th">{L["item_name"]}</div>', unsafe_allow_html=True)
+        h[2].markdown(f'<div class="inv-th r">{L["qty"]}</div>', unsafe_allow_html=True)
+        h[3].markdown(f'<div class="inv-th r">{L["unit_price"]}</div>', unsafe_allow_html=True)
+        h[4].markdown(f'<div class="inv-th r">{L["amount"]}</div>', unsafe_allow_html=True)
+        h[5].markdown('<div class="inv-th-blank">&nbsp;</div>', unsafe_allow_html=True)
+
+        items = []
+        subtotal = 0.0
+        can_remove = len(st.session_state.item_ids) > 1
+
+        for idx, row_id in enumerate(list(st.session_state.item_ids), 1):
+            c = st.columns(ITEM_COLS, gap="small", vertical_alignment="center")
+            c[0].markdown(f'<div class="inv-idx">{idx}</div>', unsafe_allow_html=True)
+            with c[1]:
+                name = st.text_input(L["item_name"], key=_item_key(row_id, "name"),
+                                     label_visibility="collapsed",
+                                     placeholder=L["ph_item"])
+            with c[2]:
+                qty = st.number_input(L["qty"], min_value=1, step=1,
+                                      key=_item_key(row_id, "qty"),
+                                      label_visibility="collapsed")
+            with c[3]:
+                unit_price = st.number_input(L["unit_price"], min_value=0.0,
+                                             step=price_step, format=price_fmt,
+                                             key=_item_key(row_id, "price"),
+                                             label_visibility="collapsed")
             line_amount = qty * unit_price
-            st.text_input(L["amount"], value=fmt_money(line_amount, sym),
-                          disabled=True, key=f"item_amt_{i}",
-                          label_visibility="visible" if i == 0 else "collapsed")
-        with ic5:
-            if i == 0:
-                st.write("")  # spacer for alignment
-            if i > 0:
-                if st.button("✕", key=f"remove_{i}", help=L["remove_item"]):
-                    st.session_state.item_count -= 1
-                    for k in [f"item_name_{i}", f"item_qty_{i}", f"item_price_{i}", f"item_amt_{i}"]:
-                        st.session_state.pop(k, None)
-                    st.rerun()
+            c[4].markdown(f'<div class="inv-amt">{fmt_money(line_amount, sym)}</div>',
+                          unsafe_allow_html=True)
+            with c[5]:
+                st.button("✕", key=f"remove_{row_id}", help=L["remove_item"],
+                          on_click=remove_row, args=(row_id,),
+                          disabled=not can_remove)
 
-        items.append({"name": name, "qty": qty, "unit_price": unit_price, "amount": line_amount})
-        subtotal += line_amount
+            items.append({"name": name, "qty": qty,
+                          "unit_price": unit_price, "amount": line_amount})
+            subtotal += line_amount
 
-    if st.button(f"➕ {L['add_item']}"):
-        st.session_state.item_count += 1
-        st.rerun()
+        st.button(f"➕ {L['add_item']}", key="add_item_btn", on_click=append_row)
 
-    # --- Tax & Total ---
-    st.markdown("---")
-    t1, t2, t3 = st.columns(3)
-    with t1:
-        tax_rate = st.number_input(L["tax_rate"], min_value=0.0, max_value=100.0,
-                                   value=10.0, step=0.5)
-    with t2:
-        tax = subtotal * tax_rate / 100
-        st.metric(L["tax"], fmt_money(tax, sym))
-    with t3:
-        total = subtotal + tax
-        st.metric(L["total"], fmt_money(total, sym))
+        # --- Totals, right aligned like the PDF ---
+        _, totals_col = st.columns([1.6, 1])
+        with totals_col:
+            tax_rate = st.number_input(L["tax_rate"], min_value=0.0, max_value=100.0,
+                                       step=0.5, format="%.1f", key="tax_rate")
+            tax = subtotal * tax_rate / 100
+            total = subtotal + tax
+            st.markdown(
+                f'<div class="inv-total-row"><span class="label">{L["subtotal"]}</span>'
+                f'<span>{fmt_money(subtotal, sym)}</span></div>'
+                f'<div class="inv-total-row"><span class="label">{L["tax"]}'
+                f' ({tax_rate:g}%)</span><span>{fmt_money(tax, sym)}</span></div>'
+                f'<div class="inv-total-row grand"><span class="label">{L["total"]}</span>'
+                f'<span>{fmt_money(total, sym)}</span></div>',
+                unsafe_allow_html=True)
 
-    st.caption(f"{L['subtotal']}: {fmt_money(subtotal, sym)}")
+        st.markdown('<div class="inv-rule"></div>', unsafe_allow_html=True)
 
-    # --- Payment Info ---
-    st.subheader(L["payment_title"])
-    pc1, pc2, pc3 = st.columns(3)
-    with pc1:
-        bank_name = st.text_input(L["bank_name"])
-    with pc2:
-        account_no = st.text_input(L["account_no"])
-    with pc3:
-        account_holder = st.text_input(L["account_holder"])
+        # --- Payment info ---
+        st.markdown(f'<div class="inv-section">{L["payment_title"]}</div>',
+                    unsafe_allow_html=True)
+        pc1, pc2, pc3 = st.columns(3)
+        with pc1:
+            bank_name = st.text_input(L["bank_name"], key="bank_name",
+                                      placeholder=L["ph_bank"])
+        with pc2:
+            account_no = st.text_input(L["account_no"], key="account_no",
+                                       placeholder=L["ph_account_no"])
+        with pc3:
+            account_holder = st.text_input(L["account_holder"], key="account_holder",
+                                           placeholder=L["ph_holder"])
 
-    # --- Notes ---
-    st.subheader(L["notes_title"])
-    notes = st.text_area(L["notes_title"], placeholder=L["notes_placeholder"],
-                         label_visibility="collapsed")
+        # --- Notes ---
+        st.markdown(f'<div class="inv-section">{L["notes_title"]}</div>',
+                    unsafe_allow_html=True)
+        notes = st.text_area(L["notes_title"], key="notes",
+                             placeholder=L["notes_placeholder"],
+                             label_visibility="collapsed", height=90)
+
+        st.markdown(f'<div class="inv-footer">{L["pdf_footer"]}</div>',
+                    unsafe_allow_html=True)
+    # ================= /The invoice document =================
 
     # --- Generate PDF ---
-    st.markdown("---")
+    filled_items = [it for it in items if it["name"].strip()]
+    missing = []
+    if not from_company.strip():
+        missing.append(f"{L['from_title']} · {L['company']}")
+    if not to_company.strip():
+        missing.append(f"{L['to_title']} · {L['company']}")
+    if not filled_items:
+        missing.append(L["items_title"])
 
-    if st.button(f"🖨️ {L['generate']}", type="primary", use_container_width=True):
-        # Validate
-        has_items = any(it["name"].strip() for it in items)
-        if not from_company or not to_company or not has_items:
-            st.error(L["fill_warning"])
-        else:
-            invoice_data = {
-                "invoice_no": invoice_no,
-                "issue_date": str(issue_date),
-                "due_date": str(due_date),
-                "from": {
-                    "company": from_company,
-                    "business_no": from_bizno,
-                    "address": from_address,
-                    "email": from_email,
-                    "phone": from_phone,
-                },
-                "to": {
-                    "company": to_company,
-                    "business_no": to_bizno,
-                    "address": to_address,
-                    "email": to_email,
-                    "phone": to_phone,
-                },
-                "items": [it for it in items if it["name"].strip()],
-                "subtotal": subtotal,
-                "tax_rate": tax_rate,
-                "tax": tax,
-                "total": total,
-                "payment": {
-                    "bank": bank_name,
-                    "account_no": account_no,
-                    "holder": account_holder,
-                },
-                "notes": notes,
-            }
+    if missing:
+        st.caption("⚠️ " + L["fill_warning"] + " — " + ", ".join(missing))
 
-            pdf_bytes = generate_pdf(invoice_data, lang_code, currency)
+    if st.button(f"🖨️ {L['generate']}", type="primary", use_container_width=True,
+                 disabled=bool(missing)):
+        invoice_data = {
+            "invoice_no": invoice_no,
+            "issue_date": str(issue_date),
+            "due_date": str(due_date),
+            "from": {
+                "company": from_company,
+                "business_no": from_bizno,
+                "address": from_address,
+                "email": from_email,
+                "phone": from_phone,
+            },
+            "to": {
+                "company": to_company,
+                "business_no": to_bizno,
+                "address": to_address,
+                "email": to_email,
+                "phone": to_phone,
+            },
+            "items": filled_items,
+            "subtotal": sum(it["amount"] for it in filled_items),
+            "tax_rate": tax_rate,
+            "tax": sum(it["amount"] for it in filled_items) * tax_rate / 100,
+            "total": sum(it["amount"] for it in filled_items) * (1 + tax_rate / 100),
+            "payment": {
+                "bank": bank_name,
+                "account_no": account_no,
+                "holder": account_holder,
+            },
+            "notes": notes,
+        }
 
-            st.success("✅")
+        st.session_state.pdf_bytes = generate_pdf(invoice_data, lang_code, currency)
+        st.session_state.pdf_name = f"{invoice_no or 'invoice'}.pdf"
 
-            # Render preview using pdf.js
-            st.markdown(f"#### {L['preview']}")
-            render_pdf_preview(pdf_bytes)
-
-            # Download button
-            st.download_button(
-                label=f"⬇️ {L['download']}",
-                data=pdf_bytes,
-                file_name=f"{invoice_no}.pdf",
-                mime="application/pdf",
-            )
+    # Preview + download survive reruns because the PDF lives in session state.
+    if st.session_state.get("pdf_bytes"):
+        st.success(f"✅ {L['generated']}")
+        st.markdown(f"#### {L['preview']}")
+        render_pdf_preview(st.session_state.pdf_bytes)
+        st.download_button(
+            label=f"⬇️ {L['download']}",
+            data=st.session_state.pdf_bytes,
+            file_name=st.session_state.get("pdf_name", "invoice.pdf"),
+            mime="application/pdf",
+            key="created_download",
+        )
