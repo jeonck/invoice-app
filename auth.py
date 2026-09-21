@@ -1,131 +1,116 @@
-"""Password gate for the invoice app.
+"""Google sign-in gate for the invoice app.
 
-Credentials are read from Streamlit secrets and only ever stored as a
-PBKDF2-SHA256 hash — the app never holds a plaintext password:
+Authentication is Streamlit's built-in OIDC (``st.login``); this module adds
+the part OIDC does not give you — **an allowlist**. Any Google account in the
+world can complete the sign-in flow, so the email that comes back is checked
+against the addresses configured for this app:
 
     # .streamlit/secrets.toml   (never commit this file)
-    [app_auth.users]
-    jeonck = "pbkdf2_sha256$600000$<salt>$<hash>"
+    [auth]
+    redirect_uri = "http://localhost:8501/oauth2callback"
+    cookie_secret = "<a long random string>"
 
-Kept out of ``[auth]`` on purpose: that section belongs to Streamlit's own
-``st.login()`` OIDC support, which reads ``[auth.<provider>]`` subsections.
+    [auth.google]
+    client_id = "<...>.apps.googleusercontent.com"
+    client_secret = "<...>"
+    server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
 
-Generate the value with `python tools/hash_password.py`.
+    [app_auth]
+    allowed_emails = ["you@example.com"]
 
-With no users configured the gate fails closed: the app refuses to render
-and explains the setup instead of quietly serving an open invoice form.
+Both halves must be present. Missing OIDC config, or an empty allowlist,
+fails closed: the app refuses to render the invoice form rather than serving
+it to whoever arrives.
 """
-
-import base64
-import hashlib
-import hmac
-import os
-import time
 
 import streamlit as st
 
-ALGORITHM = "pbkdf2_sha256"
-ITERATIONS = 600_000  # OWASP's floor for PBKDF2-HMAC-SHA256
-MAX_ATTEMPTS = 5
-LOCKOUT_SECONDS = 60
-
-# Compared against when the username is unknown, so a wrong username costs
-# the same time as a wrong password and cannot be told apart from one.
-_DUMMY_HASH = (
-    "pbkdf2_sha256$600000$AAAAAAAAAAAAAAAAAAAAAA==$"
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-)
+PROVIDER = "google"
 
 
-def _b64(raw: bytes) -> str:
-    return base64.b64encode(raw).decode("ascii")
-
-
-def _unb64(text: str) -> bytes:
-    return base64.b64decode(text.encode("ascii"))
-
-
-def hash_password(password: str, *, iterations: int = ITERATIONS) -> str:
-    """Return a self-describing hash string for secrets.toml."""
-    salt = os.urandom(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
-    return "$".join([ALGORITHM, str(iterations), _b64(salt), _b64(digest)])
-
-
-def verify_password(password: str, encoded: str) -> bool:
-    """Check a password against a stored hash in constant time."""
+def allowed_emails() -> set:
+    """Addresses permitted to use this app, lowercased."""
     try:
-        algorithm, iterations, salt_b64, digest_b64 = str(encoded).split("$")
-        if algorithm != ALGORITHM:
-            return False
-        expected = _unb64(digest_b64)
-        actual = hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), _unb64(salt_b64),
-            int(iterations), dklen=len(expected),
-        )
+        configured = st.secrets["app_auth"]["allowed_emails"]
+    except Exception:
+        return set()
+    if isinstance(configured, str):
+        configured = [configured]
+    try:
+        return {str(email).strip().lower() for email in configured if str(email).strip()}
+    except Exception:
+        return set()
+
+
+def oidc_configured() -> bool:
+    """True when secrets carry everything st.login() needs for Google."""
+    try:
+        auth_section = st.secrets["auth"]
+        provider = auth_section[PROVIDER]
+        return bool(auth_section["redirect_uri"]
+                    and auth_section["cookie_secret"]
+                    and provider["client_id"]
+                    and provider["client_secret"])
     except Exception:
         return False
-    return hmac.compare_digest(actual, expected)
 
 
-def configured_users() -> dict:
-    """Users from secrets. Empty when secrets are missing or malformed."""
+def _claim(name, default=None):
+    """Read one claim off st.user without blowing up when it is absent."""
     try:
-        users = st.secrets["app_auth"]["users"]
+        return getattr(st.user, name)
     except Exception:
-        return {}
-    try:
-        return {str(name): str(value) for name, value in dict(users).items()}
-    except Exception:
-        return {}
+        return default
+
+
+def is_signed_in() -> bool:
+    return bool(_claim("is_logged_in", False))
+
+
+def signed_in_email() -> str:
+    return str(_claim("email", "") or "").strip().lower()
 
 
 def current_user():
-    return st.session_state.get("auth_user")
+    """The signed-in, allowed email — or None."""
+    if not is_signed_in():
+        return None
+    email = signed_in_email()
+    return email if email and email in allowed_emails() else None
 
 
-def logout():
-    """Callback: end the session's authentication."""
-    st.session_state.pop("auth_user", None)
-    st.session_state.pop("auth_failures", None)
-    st.session_state.pop("auth_locked_until", None)
-
-
-def _lock_remaining() -> int:
-    until = st.session_state.get("auth_locked_until", 0)
-    return max(0, int(until - time.time()))
-
-
-def _register_failure():
-    failures = st.session_state.get("auth_failures", 0) + 1
-    st.session_state.auth_failures = failures
-    if failures >= MAX_ATTEMPTS:
-        st.session_state.auth_locked_until = time.time() + LOCKOUT_SECONDS
-        st.session_state.auth_failures = 0
+def _email_is_verified() -> bool:
+    """Google sets email_verified; treat a present-and-false claim as a no."""
+    return _claim("email_verified", True) is not False
 
 
 def require_login(L) -> bool:
-    """Render the login screen unless this session is already signed in.
-
-    Returns True when the caller may render the app. The lockout counter
-    lives in session state, so it slows down guessing in one browser
-    session rather than a determined attacker — the passphrase is what
-    carries the security here.
-    """
-    if current_user():
-        return True
-
-    users = configured_users()
-    if not users:
-        st.error(f"🔒 {L['login_setup_title']}")
+    """Render the sign-in screen unless this visitor may use the app."""
+    if not oidc_configured():
+        st.error(f"\N{LOCK} {L['login_setup_title']}")
         st.markdown(L["login_setup_body"])
         st.code(
-            "# .streamlit/secrets.toml\n"
-            "[app_auth.users]\n"
-            'your-name = "pbkdf2_sha256$600000$...$..."\n',
+            '# .streamlit/secrets.toml\n'
+            '[auth]\n'
+            'redirect_uri = "http://localhost:8501/oauth2callback"\n'
+            'cookie_secret = "<a long random string>"\n\n'
+            '[auth.google]\n'
+            'client_id = "<...>.apps.googleusercontent.com"\n'
+            'client_secret = "<...>"\n'
+            'server_metadata_url = '
+            '"https://accounts.google.com/.well-known/openid-configuration"\n\n'
+            '[app_auth]\n'
+            'allowed_emails = ["you@example.com"]\n',
             language="toml",
         )
-        st.code("python tools/hash_password.py", language="bash")
+        return False
+
+    # OIDC alone would let in any Google account, so an empty allowlist is a
+    # misconfiguration rather than a permissive default.
+    if not allowed_emails():
+        st.error(f"\N{LOCK} {L['login_allowlist_title']}")
+        st.markdown(L["login_allowlist_body"])
+        st.code('[app_auth]\nallowed_emails = ["you@example.com"]\n', language="toml")
         return False
 
     _, middle, _ = st.columns([1, 1.6, 1])
@@ -135,26 +120,19 @@ def require_login(L) -> bool:
         st.markdown(f'<div class="inv-doc-caption">{L["login_caption"]}</div>',
                     unsafe_allow_html=True)
 
-        locked_for = _lock_remaining()
-        with st.form("login_form"):
-            username = st.text_input(L["login_user"], autocomplete="username")
-            password = st.text_input(L["login_password"], type="password",
-                                     autocomplete="current-password")
-            submitted = st.form_submit_button(L["login_submit"],
-                                              type="primary",
-                                              use_container_width=True,
-                                              disabled=bool(locked_for))
+        if not is_signed_in():
+            # st.login() redirects, so it must come from a click rather than
+            # from the script run itself.
+            if st.button(f"\N{KEY} {L['login_google']}", type="primary",
+                         use_container_width=True, key="google_login_btn"):
+                st.login(PROVIDER)
+            return False
 
-        if locked_for:
-            st.error(L["login_locked"].format(seconds=locked_for))
-        elif submitted:
-            stored = users.get(username.strip(), _DUMMY_HASH)
-            if username.strip() in users and verify_password(password, stored):
-                st.session_state.auth_user = username.strip()
-                st.session_state.pop("auth_failures", None)
-                st.rerun()
-            else:
-                _register_failure()
-                st.error(L["login_failed"])
+        email = signed_in_email()
+        if not email or not _email_is_verified() or email not in allowed_emails():
+            st.error(L["login_denied"].format(email=email or "?"))
+            st.button(f"\N{DOOR} {L['logout']}", on_click=st.logout,
+                      use_container_width=True, key="denied_logout_btn")
+            return False
 
-    return False
+    return True

@@ -206,17 +206,19 @@ LABELS = {
         "font_warning": "한글 폰트를 불러오지 못했습니다. PDF의 한글이 네모로 표시될 수 있습니다. fonts/NanumGothic-Regular.ttf 파일이 저장소에 포함되어 있는지 확인하세요.",
         "payment_notice": "계좌정보는 서버에 저장되지 않고 현재 브라우저 세션에서만 유지되며, '전체 지우기'를 누르면 즉시 삭제됩니다. 다만 생성된 PDF는 암호화되지 않으니 전달 경로에 주의하세요.",
         "login_title": "로그인",
-        "login_caption": "이 인보이스 도구는 등록된 사용자만 사용할 수 있습니다.",
-        "login_user": "사용자명",
-        "login_password": "비밀번호",
-        "login_submit": "로그인",
-        "login_failed": "사용자명 또는 비밀번호가 올바르지 않습니다.",
-        "login_locked": "로그인 시도가 너무 많습니다. {seconds}초 후 다시 시도하세요.",
-        "login_setup_title": "로그인 설정이 필요합니다",
-        "login_setup_body": ("계정이 하나도 설정되지 않아 앱을 잠근 상태입니다. "
-                             "아래 명령으로 비밀번호 해시를 만들어 `.streamlit/secrets.toml` "
+        "login_caption": "허용된 Google 계정만 이 인보이스 도구를 사용할 수 있습니다.",
+        "login_google": "Google 계정으로 로그인",
+        "login_denied": ("{email} 계정에는 사용 권한이 없습니다. "
+                         "허용 목록에 추가된 계정으로 다시 로그인하세요."),
+        "login_setup_title": "Google 로그인 설정이 필요합니다",
+        "login_setup_body": ("OIDC 설정이 없어 앱을 잠근 상태입니다. Google Cloud Console에서 "
+                             "OAuth 클라이언트를 만든 뒤 아래 내용을 `.streamlit/secrets.toml` "
                              "(Streamlit Cloud는 **Settings → Secrets**)에 추가하세요. "
-                             "비밀번호 원문은 어디에도 저장되지 않습니다."),
+                             "설정 방법은 README를 참고하세요."),
+        "login_allowlist_title": "허용 계정 목록이 비어 있습니다",
+        "login_allowlist_body": ("Google 로그인만으로는 어떤 Google 계정이든 들어올 수 있어, "
+                                 "허용 목록이 비어 있으면 앱을 잠급니다. "
+                                 "사용할 이메일 주소를 추가하세요."),
         "logout": "로그아웃",
         "ph_from_company": "우리 회사 이름",
         "ph_to_company": "청구할 거래처 이름",
@@ -284,17 +286,19 @@ LABELS = {
         "font_warning": "The Korean font could not be loaded, so Korean text may appear as empty boxes in the PDF. Check that fonts/NanumGothic-Regular.ttf is present in the repository.",
         "payment_notice": "Bank details are not stored on the server — they live only in this browser session and are erased by 'Clear all'. The generated PDF itself is not encrypted, so be deliberate about how you send it.",
         "login_title": "Sign in",
-        "login_caption": "This invoice tool is limited to registered users.",
-        "login_user": "Username",
-        "login_password": "Password",
-        "login_submit": "Sign in",
-        "login_failed": "That username or password is not correct.",
-        "login_locked": "Too many attempts. Try again in {seconds} seconds.",
-        "login_setup_title": "Login is not configured yet",
-        "login_setup_body": ("No account is configured, so the app is locked. Generate a "
-                             "password hash with the command below and put it in "
-                             "`.streamlit/secrets.toml` (on Streamlit Cloud: "
-                             "**Settings → Secrets**). The password itself is never stored."),
+        "login_caption": "This invoice tool is limited to approved Google accounts.",
+        "login_google": "Sign in with Google",
+        "login_denied": ("{email} is not approved for this app. "
+                         "Sign in with an address on the allowlist."),
+        "login_setup_title": "Google sign-in is not configured yet",
+        "login_setup_body": ("No OIDC configuration was found, so the app is locked. Create "
+                             "an OAuth client in the Google Cloud Console, then add the "
+                             "settings below to `.streamlit/secrets.toml` (on Streamlit "
+                             "Cloud: **Settings → Secrets**). The README has the steps."),
+        "login_allowlist_title": "The allowlist is empty",
+        "login_allowlist_body": ("Google sign-in on its own would admit any Google account, "
+                                 "so an empty allowlist keeps the app locked. Add the "
+                                 "addresses that may use it."),
         "logout": "Sign out",
         "ph_from_company": "Your company name",
         "ph_to_company": "Client company name",
@@ -866,7 +870,7 @@ def sign_out():
     """Callback: log out, leaving no invoice data behind in the session."""
     reset_form()
     st.session_state.pop("form_notice", None)
-    auth.logout()
+    st.logout()
 
 
 with st.sidebar:

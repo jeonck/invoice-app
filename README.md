@@ -11,39 +11,56 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Login (required)
+## Sign-in (required)
 
-The app is gated and **fails closed**: with no account configured it refuses to
-render the invoice form and shows the setup instructions instead. Bank details
-go into this form, so it should never be an open page on the internet.
+The app is gated by **Google sign-in** and **fails closed**: with no OIDC
+configuration, or with an empty allowlist, it refuses to render the invoice
+form and shows what is missing instead. Bank details go into this form, so it
+should never be an open page on the internet.
 
-1. Generate a password hash — the password itself is never stored anywhere:
+Note that Google sign-in on its own admits *any* Google account — the allowlist
+is what limits the app to you, so both halves below are required.
 
-   ```bash
-   python tools/hash_password.py
-   ```
+### 1. Create an OAuth client
 
-2. Paste the output into `.streamlit/secrets.toml` locally, or into
-   **Settings → Secrets** on Streamlit Community Cloud:
+In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
+**Create credentials → OAuth client ID → Web application**, and add the
+redirect URI for each place the app runs:
 
-   ```toml
-   [app_auth.users]
-   your-name = "pbkdf2_sha256$600000$...$..."
-   ```
+| Where | Authorized redirect URI |
+| --- | --- |
+| Local | `http://localhost:8501/oauth2callback` |
+| Streamlit Cloud | `https://<your-app>.streamlit.app/oauth2callback` |
 
-   More than one line adds more users. `.streamlit/secrets.toml` is gitignored —
-   keep it that way.
+### 2. Configure secrets
 
-Passwords are hashed with PBKDF2-HMAC-SHA256 (600,000 iterations, per-user salt)
-and compared in constant time. Five failed attempts lock that browser session for
-a minute; the passphrase is what carries the security, so make it a long one.
+Put this in `.streamlit/secrets.toml` locally, or in **Settings → Secrets** on
+Streamlit Community Cloud. The file is gitignored — keep it that way.
 
-Signing in is per browser session: a refresh asks again, and signing out wipes
-the invoice form — bank details included — from the session.
+```toml
+[auth]
+redirect_uri = "http://localhost:8501/oauth2callback"
+cookie_secret = "<a long random string>"   # e.g. python -c "import secrets; print(secrets.token_urlsafe(32))"
 
-The section is `[app_auth]`, not `[auth]`, because `[auth]` belongs to
-Streamlit's own `st.login()` OIDC support. Switching to Google sign-in later
-therefore doesn't collide with this.
+[auth.google]
+client_id = "<...>.apps.googleusercontent.com"
+client_secret = "<...>"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+
+[app_auth]
+allowed_emails = ["you@example.com"]       # who may actually use the app
+```
+
+An address is admitted only when Google reports it as verified and it appears
+in `allowed_emails` (matched case-insensitively). Everyone else gets a refusal
+and a sign-out button.
+
+Streamlit keeps the identity in a signed cookie, so a refresh does not sign you
+out. Signing out clears the cookie **and** wipes the invoice form — bank details
+included — from the session.
+
+The app's own settings live in `[app_auth]` so they cannot collide with the
+`[auth]` section that Streamlit's OIDC support owns.
 
 ## How data is handled
 
