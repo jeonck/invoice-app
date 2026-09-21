@@ -18,6 +18,7 @@ from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 from xml.sax.saxutils import escape as _xml_escape
 
 import auth
+import drive
 
 # ---------------------------------------------------------------------------
 # 한글 폰트 등록
@@ -220,6 +221,17 @@ LABELS = {
                                  "허용 목록이 비어 있으면 앱을 잠급니다. "
                                  "사용할 이메일 주소를 추가하세요."),
         "logout": "로그아웃",
+        "drive_save": "Google Drive에 저장",
+        "drive_saved": "Drive의 Invoices 폴더에 PDF와 입력 데이터를 저장했습니다.",
+        "drive_open": "Drive에서 열기",
+        "drive_unavailable": ("Google Drive 저장은 secrets에 Drive 권한(scope)과 "
+                              "expose_tokens 설정을 추가해야 사용할 수 있습니다. "
+                              "설정 방법은 README를 참고하세요."),
+        "drive_err_unavailable": "Drive 접근 토큰이 없습니다. 다시 로그인한 뒤 시도하세요.",
+        "drive_err_expired": ("Drive 접근 권한이 만료되었습니다. 로그아웃 후 다시 "
+                              "로그인하면 저장할 수 있습니다."),
+        "drive_err_network": "Google Drive에 연결하지 못했습니다. 잠시 후 다시 시도하세요.",
+        "drive_err_http": "Drive 저장에 실패했습니다. 잠시 후 다시 시도하세요.",
         "ph_from_company": "우리 회사 이름",
         "ph_to_company": "청구할 거래처 이름",
         "ph_bizno": "123-45-67890",
@@ -300,6 +312,17 @@ LABELS = {
                                  "so an empty allowlist keeps the app locked. Add the "
                                  "addresses that may use it."),
         "logout": "Sign out",
+        "drive_save": "Save to Google Drive",
+        "drive_saved": "Saved the PDF and its form data to the Invoices folder in Drive.",
+        "drive_open": "Open in Drive",
+        "drive_unavailable": ("Saving to Google Drive needs the Drive scope and "
+                              "expose_tokens added to your auth secrets. The README "
+                              "has the settings."),
+        "drive_err_unavailable": "No Drive token available. Sign in again and retry.",
+        "drive_err_expired": ("Drive access has expired. Sign out and back in, then "
+                              "save again."),
+        "drive_err_network": "Could not reach Google Drive. Try again in a moment.",
+        "drive_err_http": "Saving to Drive failed. Try again in a moment.",
         "ph_from_company": "Your company name",
         "ph_to_company": "Client company name",
         "ph_bizno": "EIN 00-0000000",
@@ -703,7 +726,8 @@ def reset_form():
     for key in FORM_TEXT_KEYS:
         st.session_state.pop(key, None)
     for key in ("issue_date", "due_date", "tax_rate", "form_ready",
-                "pdf_bytes", "pdf_name", "form_notice"):
+                "pdf_bytes", "pdf_name", "pdf_data", "form_notice",
+                "drive_result", "drive_error"):
         st.session_state.pop(key, None)
     init_form_state()
     st.session_state.form_notice = "cleared"
@@ -1139,16 +1163,53 @@ with tab_create:
 
         st.session_state.pdf_bytes = generate_pdf(invoice_data, lang_code, currency)
         st.session_state.pdf_name = safe_pdf_filename(invoice_no)
+        st.session_state.pdf_data = invoice_data
+        st.session_state.pop("drive_result", None)
+        st.session_state.pop("drive_error", None)
 
     # Preview + download survive reruns because the PDF lives in session state.
     if st.session_state.get("pdf_bytes"):
         st.success(f"✅ {L['generated']}")
         st.markdown(f"#### {L['preview']}")
         render_pdf_preview(st.session_state.pdf_bytes)
-        st.download_button(
-            label=f"⬇️ {L['download']}",
-            data=st.session_state.pdf_bytes,
-            file_name=st.session_state.get("pdf_name", "invoice.pdf"),
-            mime="application/pdf",
-            key="created_download",
-        )
+
+        dl_col, drive_col = st.columns(2)
+        with dl_col:
+            st.download_button(
+                label=f"⬇️ {L['download']}",
+                data=st.session_state.pdf_bytes,
+                file_name=st.session_state.get("pdf_name", "invoice.pdf"),
+                mime="application/pdf",
+                key="created_download",
+                use_container_width=True,
+            )
+        with drive_col:
+            drive_ready = drive.is_available()
+            if st.button(f"💾 {L['drive_save']}", key="drive_save_btn",
+                         use_container_width=True, disabled=not drive_ready):
+                stem = st.session_state.get("pdf_name", "invoice.pdf")[:-4]
+                try:
+                    st.session_state.drive_result = drive.save_invoice(
+                        st.session_state.pdf_bytes,
+                        st.session_state.get("pdf_data", {}),
+                        stem,
+                        str(st.session_state.get("issue_date", date.today()))[:4],
+                    )
+                    st.session_state.pop("drive_error", None)
+                except drive.DriveError as exc:
+                    st.session_state.drive_error = exc.code
+                    st.session_state.pop("drive_result", None)
+                st.rerun()
+
+        if not drive.is_available():
+            st.caption(f"ℹ️ {L['drive_unavailable']}")
+
+        saved = st.session_state.get("drive_result")
+        if saved:
+            link = saved["pdf"].get("webViewLink")
+            message = f"✅ {L['drive_saved']}"
+            st.success(f"{message} — [{L['drive_open']}]({link})" if link else message)
+
+        failure = st.session_state.get("drive_error")
+        if failure:
+            st.error(f"⚠️ {L.get('drive_err_' + failure, L['drive_err_http'])}")

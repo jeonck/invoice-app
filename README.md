@@ -67,11 +67,42 @@ included — from the session.
 The app's own settings live in `[app_auth]` so they cannot collide with the
 `[auth]` section that Streamlit's OIDC support owns.
 
+## Saving invoices to Google Drive (optional)
+
+With two more settings, a generated invoice can be saved to **the signed-in
+person's own Drive** — `Invoices/<year>/INV-....pdf` plus `INV-....json`, the
+form data, so an invoice can be loaded back and reissued later. Saving the same
+invoice number again replaces those two files instead of piling up copies.
+
+```toml
+[auth]
+expose_tokens = ["access"]                 # alongside redirect_uri / cookie_secret
+
+[auth.google]
+client_kwargs = { scope = "openid email profile https://www.googleapis.com/auth/drive.file" }
+```
+
+Enable the **Google Drive API** for the same project in the Cloud Console. The
+`drive.file` scope is the narrow one: this app can only ever see files it created
+itself, never the rest of the Drive.
+
+The app stores **no credential of its own** — it borrows the access token from
+the sign-in that already happened, so the files belong to the person who made
+them and access can be revoked from their Google account settings. That token is
+short-lived and Streamlit does not refresh it, so a long-open session may need a
+fresh sign-in before saving; the app says so when that happens.
+
+Without these settings the save button stays disabled and the app works exactly
+as before — generate and download.
+
 ## How data is handled
 
-- Nothing is written to disk or to a database. Form values live in the
-  Streamlit session and disappear on sign-out, on "Clear all", or when the
-  session ends.
+- Nothing is written to disk or to a database on the server. Form values live
+  in the Streamlit session and disappear on sign-out, on "Clear all", or when
+  the session ends.
+- The only thing that leaves the session is what you explicitly save to your own
+  Google Drive. Those files contain the bank details you typed, so treat that
+  folder the way you would treat the invoices themselves.
 - Text from the form is escaped before it reaches reportlab, so a field cannot
   style itself in the PDF or make the server fetch a URL while the PDF builds.
 - The generated PDF is **not** encrypted. Anyone who receives the file can read
