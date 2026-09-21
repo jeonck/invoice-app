@@ -190,6 +190,7 @@ LABELS = {
         "generate": "PDF 생성",
         "download": "PDF 다운로드",
         "preview": "미리보기",
+        "preview_unavailable": "미리보기를 불러오지 못했습니다. PDF 자체는 정상이니 다운로드 버튼을 사용하세요.",
         "pdf_header": "청구서",
         "pdf_footer": "감사합니다.",
         "fill_warning": "발신자, 수신자 회사명과 최소 1개 품목을 입력하세요.",
@@ -210,6 +211,16 @@ LABELS = {
         "login_title": "로그인",
         "login_caption": "허용된 Google 계정만 이 인보이스 도구를 사용할 수 있습니다.",
         "login_google": "Google 계정으로 로그인",
+        "login_feature_doc": ("#### 📄 채우면 그대로 문서\n"
+                              "입력 양식이 완성될 PDF와 같은 순서·배치입니다. "
+                              "한글·영문, 원화·달러를 지원합니다."),
+        "login_feature_drive": ("#### 💾 내 Drive에 저장\n"
+                                "완성본은 **본인 Google Drive**에 저장됩니다. "
+                                "그래서 Google 로그인이 필요하고, 이 앱은 아무것도 보관하지 않습니다."),
+        "login_feature_reuse": ("#### 🔄 불러와서 재사용\n"
+                                "저장한 인보이스를 불러와 수정하면 됩니다. "
+                                "매달 반복되는 청구가 몇 분이면 끝납니다."),
+        "login_preview_note": "아래는 이 도구로 만든 샘플 인보이스입니다.",
         "login_denied": ("{email} 계정에는 사용 권한이 없습니다. "
                          "허용 목록에 추가된 계정으로 다시 로그인하세요."),
         "login_setup_title": "Google 로그인 설정이 필요합니다",
@@ -309,6 +320,7 @@ LABELS = {
         "generate": "Generate PDF",
         "download": "Download PDF",
         "preview": "Preview",
+        "preview_unavailable": "The preview could not load. The PDF itself is fine — use the download button.",
         "pdf_header": "INVOICE",
         "pdf_footer": "Thank you for your business!",
         "fill_warning": "Please fill in From/To company names and at least one item.",
@@ -329,6 +341,17 @@ LABELS = {
         "login_title": "Sign in",
         "login_caption": "This invoice tool is limited to approved Google accounts.",
         "login_google": "Sign in with Google",
+        "login_feature_doc": ("#### 📄 The form is the document\n"
+                              "Fields sit in the same order and place as the PDF they "
+                              "produce. Korean and English, won and dollars."),
+        "login_feature_drive": ("#### 💾 Saved to your own Drive\n"
+                                "Finished invoices go to **your** Google Drive — which is "
+                                "why it asks for a Google account, and why this app keeps "
+                                "nothing."),
+        "login_feature_reuse": ("#### 🔄 Reopen and reuse\n"
+                                "Load a past invoice, change what differs, save it again. "
+                                "A recurring bill takes minutes."),
+        "login_preview_note": "Below is a sample invoice made with this tool.",
         "login_denied": ("{email} is not approved for this app. "
                          "Sign in with an address on the allowlist."),
         "login_setup_title": "Google sign-in is not configured yet",
@@ -603,22 +626,43 @@ def generate_pdf(data: dict, lang: str, currency: str) -> bytes:
 # ---------------------------------------------------------------------------
 # PDF preview using pdf.js (works on Streamlit Cloud / Chrome)
 # ---------------------------------------------------------------------------
-def render_pdf_preview(pdf_bytes: bytes, height: int = 800):
-    """Render PDF in-browser using pdf.js canvas rendering."""
+def render_pdf_preview(pdf_bytes: bytes, height: int = 800, unavailable: str = ""):
+    """Render PDF in-browser using pdf.js canvas rendering.
+
+    pdf.js comes from a CDN, which a corporate network or a content blocker
+    can refuse. Say so in that case: an empty grey box reads as a broken app,
+    and this preview is the first thing a new visitor sees.
+    """
     import streamlit.components.v1 as components
 
     b64 = base64.b64encode(pdf_bytes).decode()
+    notice = esc(unavailable or "The preview could not load. Use the download "
+                                "button — the PDF itself is fine.")
     html = f"""
     <style>
       body {{ margin:0; background:#f5f5f5; }}
       .pdf-container {{ display:flex; flex-direction:column; align-items:center; gap:12px; padding:12px 0; }}
       .pdf-container canvas {{ box-shadow:0 2px 8px rgba(0,0,0,0.15); background:white; max-width:100%; height:auto; }}
+      .pdf-fallback {{ font-family:sans-serif; font-size:14px; color:#666; text-align:center;
+                       padding:48px 24px; line-height:1.6; }}
     </style>
     <div class="pdf-container" id="pdf-container"></div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
+      function pdfUnavailable() {{
+        const box = document.getElementById('pdf-container');
+        if (box && !box.querySelector('canvas')) {{
+          box.innerHTML = '<div class="pdf-fallback">{notice}</div>';
+        }}
+      }}
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+            onerror="pdfUnavailable()"></script>
+    <script>
+      if (typeof pdfjsLib === 'undefined') {{ pdfUnavailable(); }}
+      else {{
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       (async () => {{
+       try {{
         const data = atob("{b64}");
         const uint8 = new Uint8Array(data.length);
         for (let i = 0; i < data.length; i++) uint8[i] = data.charCodeAt(i);
@@ -633,7 +677,9 @@ def render_pdf_preview(pdf_bytes: bytes, height: int = 800):
           container.appendChild(canvas);
           await page.render({{canvasContext: canvas.getContext('2d'), viewport}}).promise;
         }}
+       }} catch (err) {{ pdfUnavailable(); }}
       }})();
+      }}
     </script>
     """
     components.html(html, height=height, scrolling=True)
@@ -1078,8 +1124,28 @@ with st.sidebar:
     lang_code = "ko" if lang == "한국어" else "en"
     L = LABELS[lang_code]
 
+def show_what_this_is():
+    """The sign-in screen's pitch: what the app makes, and why Google."""
+    st.markdown("---")
+    f1, f2, f3 = st.columns(3)
+    for column, key in ((f1, "login_feature_doc"),
+                        (f2, "login_feature_drive"),
+                        (f3, "login_feature_reuse")):
+        with column:
+            st.markdown(L[key])
+
+    st.markdown(f'<div class="inv-doc-caption">{L["login_preview_note"]}</div>',
+                unsafe_allow_html=True)
+    # No currency picker exists yet on this screen, so follow the language.
+    currency = "KRW" if lang_code == "ko" else "USD"
+    render_pdf_preview(
+        generate_pdf(get_sample_data(lang_code, currency), lang_code, currency),
+        height=560, unavailable=L["preview_unavailable"],
+    )
+
+
 # --- Login gate: nothing below this line renders for a signed-out visitor ---
-if not auth.require_login(L):
+if not auth.require_login(L, preview=show_what_this_is):
     st.stop()
 
 
@@ -1146,7 +1212,7 @@ with tab_sample:
 
     # Generate sample PDF automatically, in the language now selected.
     sample_pdf = generate_pdf(sample_data, lang_code, currency)
-    render_pdf_preview(sample_pdf)
+    render_pdf_preview(sample_pdf, unavailable=L["preview_unavailable"])
 
     st.download_button(
         label=f"⬇️ {L['download']} ({L['tab_sample']})",
@@ -1429,7 +1495,8 @@ with tab_create:
     if st.session_state.get("pdf_bytes"):
         st.success(f"✅ {L['generated']}")
         st.markdown(f"#### {L['preview']}")
-        render_pdf_preview(st.session_state.pdf_bytes)
+        render_pdf_preview(st.session_state.pdf_bytes,
+                           unavailable=L["preview_unavailable"])
 
         drive_col, dl_col = st.columns(2)
         signed_in = auth.is_signed_in()

@@ -75,6 +75,13 @@ An address is admitted only when Google reports it as verified and it appears
 in `allowed_emails` (matched case-insensitively). Everyone else gets a refusal
 and a sign-out button.
 
+The sign-in screen shows what the app does and renders a live sample invoice
+below the button, so a first-time visitor can see the output before handing
+over an account — and can read why a Google account is asked for at all. If
+pdf.js cannot be fetched (a blocked CDN, a content blocker) the preview says
+so instead of leaving an empty grey box, which would read as a broken app on
+the one screen meant to invite people in.
+
 Streamlit keeps the identity in a signed cookie, so a refresh does not sign you
 out. Signing out clears the cookie **and** wipes the invoice form — bank details
 included — from the session. The app's own settings live in `[app_auth]` so they

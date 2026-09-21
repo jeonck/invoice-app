@@ -139,8 +139,13 @@ def _email_is_verified() -> bool:
     return _claim("email_verified", True) is not False
 
 
-def require_login(L) -> bool:
-    """Render the sign-in screen unless this visitor may use the app."""
+def require_login(L, preview=None) -> bool:
+    """Render the sign-in screen unless this visitor may use the app.
+
+    `preview` is an optional callable that shows what the app does. A gate
+    that says only "sign in" gives a first-time visitor nothing to decide
+    with — and no reason why a Google account is being asked for.
+    """
     if not oidc_configured():
         st.error(f"\N{LOCK} {L['login_setup_title']}")
         st.markdown(L["login_setup_body"])
@@ -179,6 +184,7 @@ def require_login(L) -> bool:
     if anonymous_use():
         return True
 
+    signed_in = is_signed_in()
     _, middle, _ = st.columns([1, 1.6, 1])
     with middle:
         st.markdown(f'<div class="inv-doc-title">{L["login_title"]}</div>',
@@ -186,19 +192,24 @@ def require_login(L) -> bool:
         st.markdown(f'<div class="inv-doc-caption">{L["login_caption"]}</div>',
                     unsafe_allow_html=True)
 
-        if not is_signed_in():
+        if not signed_in:
             # st.login() redirects, so it must come from a click rather than
             # from the script run itself.
             if st.button(f"\N{KEY} {L['login_google']}", type="primary",
                          use_container_width=True, key="google_login_btn"):
                 st.login(PROVIDER)
-            return False
+        else:
+            email = signed_in_email()
+            if not email or not _email_is_verified() or not is_allowed(email):
+                st.error(L["login_denied"].format(email=email or "?"))
+                st.button(f"\N{DOOR} {L['logout']}", on_click=st.logout,
+                          use_container_width=True, key="denied_logout_btn")
+                signed_in = False
 
-        email = signed_in_email()
-        if not email or not _email_is_verified() or not is_allowed(email):
-            st.error(L["login_denied"].format(email=email or "?"))
-            st.button(f"\N{DOOR} {L['logout']}", on_click=st.logout,
-                      use_container_width=True, key="denied_logout_btn")
-            return False
+    if not signed_in:
+        # Shown full width, below the sign-in box rather than beside it.
+        if preview is not None:
+            preview()
+        return False
 
     return True
