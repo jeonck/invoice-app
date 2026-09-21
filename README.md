@@ -73,7 +73,18 @@ allowed_emails = ["you@example.com"]       # or allow_any_google_account = true
 
 An address is admitted only when Google reports it as verified and it appears
 in `allowed_emails` (matched case-insensitively). Everyone else gets a refusal
-and a sign-out button.
+and a sign-out button — plus somewhere to write, if you give them one:
+
+```toml
+[app_auth]
+contact = "you@example.com"
+```
+
+It lives in secrets rather than in the source because this repository is
+public, and an address committed to a public repo is one the scrapers keep.
+A value that is not a single-line address is ignored rather than rendered,
+so it cannot break out of the link it goes into. Approving a request is still
+just adding the address to `allowed_emails` and rebooting.
 
 The sign-in screen shows what the app does and renders a live sample invoice
 below the button, so a first-time visitor can see the output before handing

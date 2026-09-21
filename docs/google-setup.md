@@ -136,6 +136,7 @@ client_kwargs = { scope = "openid email profile https://www.googleapis.com/auth/
 
 [app_auth]
 allowed_emails = ["you@example.com"]       # 실제로 이 앱을 쓸 사람
+contact = "you@example.com"                # (선택) 거부 화면에 표시할 문의처
 
 # 또는, 위 줄 대신 아래 중 하나:
 # allow_anonymous_use = true               # 로그인 없이 작성·다운로드, 저장/불러오기만 로그인

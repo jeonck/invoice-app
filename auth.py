@@ -32,6 +32,11 @@ Or limited to named addresses (a private tool)::
     [app_auth]
     allowed_emails = ["you@example.com"]
 
+A refused visitor gets a dead end unless there is somewhere to write::
+
+    [app_auth]
+    contact = "you@example.com"
+
 Set exactly one of the three access modes. If ``allow_anonymous_use`` is on it wins over
 the others, so adding it to an app that has an allowlist makes that app
 public — which is the point, but worth knowing before adding it "just to
@@ -121,6 +126,21 @@ def is_allowed(email: str) -> bool:
     return anonymous_use() or open_to_anyone() or email in allowed_emails()
 
 
+def contact_address() -> str:
+    """Where a refused visitor can write, or "" when none is configured.
+
+    Read from secrets rather than hardcoded: this repository is public, and
+    an address committed to it is one a scraper keeps forever.
+    """
+    try:
+        value = str(st.secrets["app_auth"].get("contact", "")).strip()
+    except Exception:
+        return ""
+    # Must be a plain single-line address; anything else would land inside a
+    # markdown link and break it.
+    return value if "@" in value and not any(c.isspace() for c in value) else ""
+
+
 def begin_sign_in():
     """Start the OIDC redirect. Only ever from a click — it navigates away."""
     st.login(PROVIDER)
@@ -202,6 +222,10 @@ def require_login(L, preview=None) -> bool:
             email = signed_in_email()
             if not email or not _email_is_verified() or not is_allowed(email):
                 st.error(L["login_denied"].format(email=email or "?"))
+                contact = contact_address()
+                if contact:
+                    st.caption(L["login_denied_contact"].format(
+                        link=f"[{contact}](mailto:{contact})"))
                 st.button(f"\N{DOOR} {L['logout']}", on_click=st.logout,
                           use_container_width=True, key="denied_logout_btn")
                 signed_in = False

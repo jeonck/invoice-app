@@ -224,6 +224,7 @@ LABELS = {
         "login_denied": ("{email} 계정에는 사용 권한이 없습니다. "
                          "허용 목록에 추가된 계정으로 다시 로그인하세요."),
         "login_setup_title": "Google 로그인 설정이 필요합니다",
+        "login_denied_contact": "사용을 원하시면 {link} 으로 연락해 주세요.",
         "login_setup_body": ("OIDC 설정이 없어 앱을 잠근 상태입니다. Google Cloud Console에서 "
                              "OAuth 클라이언트를 만든 뒤 아래 내용을 `.streamlit/secrets.toml` "
                              "(Streamlit Cloud는 **Settings → Secrets**)에 추가하세요. "
@@ -355,6 +356,7 @@ LABELS = {
         "login_denied": ("{email} is not approved for this app. "
                          "Sign in with an address on the allowlist."),
         "login_setup_title": "Google sign-in is not configured yet",
+        "login_denied_contact": "To ask for access, write to {link}.",
         "login_setup_body": ("No OIDC configuration was found, so the app is locked. Create "
                              "an OAuth client in the Google Cloud Console, then add the "
                              "settings below to `.streamlit/secrets.toml` (on Streamlit "
