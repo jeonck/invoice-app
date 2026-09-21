@@ -11,6 +11,11 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+Sign-in needs Streamlit's `auth` extra — `streamlit[auth]`, which pulls in
+Authlib and **httpx**. Installing plain `streamlit` leaves the OIDC flow to
+fail with `No module named 'httpx'` the moment someone clicks sign in, so
+install from `requirements.txt` rather than by package name.
+
 ## Sign-in (required)
 
 The app is gated by **Google sign-in** and **fails closed**: with no OIDC
