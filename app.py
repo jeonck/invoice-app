@@ -15,6 +15,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+from xml.sax.saxutils import escape as _xml_escape
 
 # ---------------------------------------------------------------------------
 # 한글 폰트 등록
@@ -201,6 +202,7 @@ LABELS = {
         "doc_caption": "아래 항목을 채우면 그대로 PDF 인보이스가 됩니다. * 는 필수 항목입니다.",
         "generated": "인보이스가 생성되었습니다.",
         "font_warning": "한글 폰트를 불러오지 못했습니다. PDF의 한글이 네모로 표시될 수 있습니다. fonts/NanumGothic-Regular.ttf 파일이 저장소에 포함되어 있는지 확인하세요.",
+        "payment_notice": "계좌정보는 서버에 저장되지 않고 현재 브라우저 세션에서만 유지되며, '전체 지우기'를 누르면 즉시 삭제됩니다. 다만 생성된 PDF는 암호화되지 않으니 전달 경로에 주의하세요.",
         "ph_from_company": "우리 회사 이름",
         "ph_to_company": "청구할 거래처 이름",
         "ph_bizno": "123-45-67890",
@@ -265,6 +267,7 @@ LABELS = {
         "doc_caption": "Fill in the fields below and they become your PDF invoice. * marks required fields.",
         "generated": "Invoice generated.",
         "font_warning": "The Korean font could not be loaded, so Korean text may appear as empty boxes in the PDF. Check that fonts/NanumGothic-Regular.ttf is present in the repository.",
+        "payment_notice": "Bank details are not stored on the server — they live only in this browser session and are erased by 'Clear all'. The generated PDF itself is not encrypted, so be deliberate about how you send it.",
         "ph_from_company": "Your company name",
         "ph_to_company": "Client company name",
         "ph_bizno": "EIN 00-0000000",
@@ -284,6 +287,27 @@ CURRENCY_SYMBOLS = {
     "EUR": "€",
     "JPY": "¥",
 }
+
+
+def esc(value) -> str:
+    """Escape user text before it enters reportlab's paragraph markup.
+
+    Paragraph() parses a small HTML-like language, so an unescaped value can
+    style itself (<font color="white">), or make the server fetch a URL
+    (<img src="http://...">) while the PDF is being built.
+    """
+    return _xml_escape(str(value))
+
+
+def esc_lines(value) -> str:
+    """Escape user text and keep its line breaks as paragraph line breaks."""
+    return "<br/>".join(esc(line) for line in str(value).splitlines())
+
+
+def safe_pdf_filename(stem: str, fallback: str = "invoice") -> str:
+    """Build a download filename that cannot carry a path or control chars."""
+    cleaned = re.sub(r"[^\w.-]+", "-", str(stem), flags=re.UNICODE).strip("-. ")
+    return f"{cleaned or fallback}.pdf"
 
 
 def fmt_money(value: float, symbol: str) -> str:
@@ -338,9 +362,9 @@ def generate_pdf(data: dict, lang: str, currency: str) -> bytes:
 
     # Invoice meta row
     meta_data = [
-        [Paragraph(f"<b>{L['invoice_no']}:</b> {data['invoice_no']}", s_normal),
-         Paragraph(f"<b>{L['issue_date']}:</b> {data['issue_date']}", s_normal),
-         Paragraph(f"<b>{L['due_date']}:</b> {data['due_date']}", s_normal)],
+        [Paragraph(f"<b>{L['invoice_no']}:</b> {esc(data['invoice_no'])}", s_normal),
+         Paragraph(f"<b>{L['issue_date']}:</b> {esc(data['issue_date'])}", s_normal),
+         Paragraph(f"<b>{L['due_date']}:</b> {esc(data['due_date'])}", s_normal)],
     ]
     meta_table = Table(meta_data, colWidths=[doc.width / 3] * 3)
     meta_table.setStyle(TableStyle([
@@ -353,15 +377,15 @@ def generate_pdf(data: dict, lang: str, currency: str) -> bytes:
     def _party_block(title, d):
         lines = [f"<b>{title}</b>"]
         if d.get("company"):
-            lines.append(d["company"])
+            lines.append(esc(d["company"]))
         if d.get("business_no"):
-            lines.append(f"{L['business_no']}: {d['business_no']}")
+            lines.append(f"{L['business_no']}: {esc(d['business_no'])}")
         if d.get("address"):
-            lines.append(d["address"])
+            lines.append(esc(d["address"]))
         if d.get("email"):
-            lines.append(d["email"])
+            lines.append(esc(d["email"]))
         if d.get("phone"):
-            lines.append(d["phone"])
+            lines.append(esc(d["phone"]))
         return Paragraph("<br/>".join(lines), s_normal)
 
     party_table = Table(
@@ -389,7 +413,7 @@ def generate_pdf(data: dict, lang: str, currency: str) -> bytes:
     for idx, item in enumerate(data["items"], 1):
         item_rows.append([
             Paragraph(str(idx), s_normal),
-            Paragraph(item["name"], s_normal),
+            Paragraph(esc(item["name"]), s_normal),
             Paragraph(str(item["qty"]), s_normal_r),
             Paragraph(fmt_money(item["unit_price"], sym), s_normal_r),
             Paragraph(fmt_money(item["amount"], sym), s_normal_r),
@@ -435,18 +459,18 @@ def generate_pdf(data: dict, lang: str, currency: str) -> bytes:
         pay = data["payment"]
         pay_lines = []
         if pay.get("bank"):
-            pay_lines.append(f"{L['bank_name']}: {pay['bank']}")
+            pay_lines.append(f"{L['bank_name']}: {esc(pay['bank'])}")
         if pay.get("account_no"):
-            pay_lines.append(f"{L['account_no']}: {pay['account_no']}")
+            pay_lines.append(f"{L['account_no']}: {esc(pay['account_no'])}")
         if pay.get("holder"):
-            pay_lines.append(f"{L['account_holder']}: {pay['holder']}")
+            pay_lines.append(f"{L['account_holder']}: {esc(pay['holder'])}")
         elements.append(Paragraph("<br/>".join(pay_lines), s_normal))
         elements.append(Spacer(1, 4 * mm))
 
     # --- Notes ---
     if data.get("notes"):
         elements.append(Paragraph(f"<b>{L['notes_title']}</b>", s_heading))
-        elements.append(Paragraph(data["notes"], s_normal))
+        elements.append(Paragraph(esc_lines(data["notes"]), s_normal))
         elements.append(Spacer(1, 4 * mm))
 
     # --- Footer ---
@@ -538,7 +562,7 @@ def get_sample_data(lang: str, currency: str) -> dict:
             "total": subtotal + tax,
             "payment": {
                 "bank": "신한은행",
-                "account_no": "110-432-789012",
+                "account_no": "000-000-000000",
                 "holder": "블루프린트 스튜디오",
             },
             "notes": "결제기한은 발행일로부터 30일입니다.\n계약 시 선금 50%가 지급되었습니다 (INV-20260110-A01).\n잔금은 프로젝트 납품 및 검수 완료 후 청구됩니다.",
@@ -579,7 +603,7 @@ def get_sample_data(lang: str, currency: str) -> dict:
             "total": subtotal + tax,
             "payment": {
                 "bank": "Chase Bank",
-                "account_no": "Routing: 021000021 / Acct: 483927105",
+                "account_no": "Routing: 000000000 / Acct: 0000000000",
                 "holder": "Oakwood Digital Agency LLC",
             },
             "notes": "Payment due within 30 days of invoice date.\nPlease reference invoice number on all payments.\nLate payments subject to 1.5% monthly interest.",
@@ -841,7 +865,7 @@ with tab_sample:
     st.download_button(
         label=f"⬇️ {L['download']} ({L['tab_sample']})",
         data=sample_pdf,
-        file_name=f"sample-{sample_data['invoice_no']}.pdf",
+        file_name=safe_pdf_filename(f"sample-{sample_data['invoice_no']}"),
         mime="application/pdf",
         key="sample_download",
     )
@@ -994,6 +1018,7 @@ with tab_create:
         # --- Payment info ---
         st.markdown(f'<div class="inv-section">{L["payment_title"]}</div>',
                     unsafe_allow_html=True)
+        st.caption(f"\U0001f512 {L['payment_notice']}")
         pc1, pc2, pc3 = st.columns(3)
         with pc1:
             bank_name = st.text_input(L["bank_name"], key="bank_name",
@@ -1063,7 +1088,7 @@ with tab_create:
         }
 
         st.session_state.pdf_bytes = generate_pdf(invoice_data, lang_code, currency)
-        st.session_state.pdf_name = f"{invoice_no or 'invoice'}.pdf"
+        st.session_state.pdf_name = safe_pdf_filename(invoice_no)
 
     # Preview + download survive reruns because the PDF lives in session state.
     if st.session_state.get("pdf_bytes"):
