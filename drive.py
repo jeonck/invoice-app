@@ -26,6 +26,7 @@ SCOPE = "https://www.googleapis.com/auth/drive.file"
 PROVIDER = "google"
 FILES_URL = "https://www.googleapis.com/drive/v3/files"
 UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
+ABOUT_URL = "https://www.googleapis.com/drive/v3/about"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 ROOT_FOLDER = "Invoices"
 TIMEOUT = 30
@@ -74,6 +75,25 @@ def is_configured() -> bool:
 def is_available() -> bool:
     """True when a token is in hand, i.e. saving can be attempted now."""
     return bool(access_token())
+
+
+def token_is_live() -> bool:
+    """One cheap call to learn whether the exposed token still works.
+
+    Worth asking before someone spends twenty minutes on a form: the token
+    lasts about an hour and Streamlit never refreshes it, so the alternative
+    is finding out at save time, when re-authenticating costs the work.
+    """
+    token = access_token()
+    if not token:
+        return False
+    try:
+        _request("GET", ABOUT_URL, token, params={"fields": "user(emailAddress)"})
+        return True
+    except DriveError as exc:
+        # Only an actual refusal means expired; a network blip must not raise
+        # a false alarm that sends someone through a pointless sign-in.
+        return exc.code != "expired"
 
 
 def _q_escape(value: str) -> str:

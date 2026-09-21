@@ -92,6 +92,24 @@ Streamlit starts a fresh session. The app warns about that before the redirect,
 and anyone who means to save or reopen is better off signing in first — which
 is exactly what the sidebar invites them to do.
 
+The access token lasts about an hour and `st.login()` never refreshes it —
+Streamlit mints no refresh token at all. Rather than discovering that at save
+time, when re-authenticating costs the work, the app asks Drive once per session
+whether the token still lives and says so up front, while signing in again is
+free. A network failure is not treated as an expiry, so a blip cannot send
+anyone through a pointless sign-in.
+
+## Drafts
+
+**Save draft (file)** downloads the form as JSON and **Load a draft file** puts
+it back. No account needed, so a visitor who is not signing in can still stop
+and resume, and it survives anything that reloads the page — an expired token, a
+stray refresh, a closed laptop.
+
+A draft and a Drive-saved invoice are the same JSON, so either file loads through
+either path. The file holds the bank details that were typed, which is worth
+saying out loud to whoever downloads one; the app does.
+
 It needs the two lines marked above (`expose_tokens` and the `drive.file`
 scope) and the Google Drive API enabled on the same project — see
 [docs/google-setup.md](docs/google-setup.md). Adding the scope to an existing

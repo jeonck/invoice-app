@@ -1,5 +1,6 @@
 import streamlit as st
 import base64
+import json
 import os
 import uuid
 import re
@@ -233,6 +234,16 @@ LABELS = {
                                   "왼쪽에서 로그인하세요."),
         "drive_save": "Google Drive에 저장",
         "drive_list": "Drive에서 불러오기",
+        "draft_save": "임시저장 (파일)",
+        "draft_load": "임시저장 파일 불러오기",
+        "draft_loaded": "임시저장 파일을 불러왔습니다.",
+        "draft_hint": ("작성 중인 내용을 JSON 파일로 내려받습니다. 로그인 없이도 쓸 수 있고, "
+                       "나중에 이 파일을 올리면 그대로 이어서 작업할 수 있습니다. "
+                       "파일에는 입력한 계좌정보가 그대로 들어 있으니 보관에 주의하세요."),
+        "draft_unreadable": "임시저장 파일을 읽지 못했습니다. 이 앱에서 내려받은 JSON 파일인지 확인하세요.",
+        "token_expired": ("Google Drive 연결이 만료되었습니다. **지금** 다시 로그인하세요 — "
+                          "작성 중에 만료되면 입력한 내용이 사라집니다."),
+        "sign_in_again": "다시 로그인",
         "drive_pick": "저장된 인보이스",
         "drive_load": "불러오기",
         "drive_loaded": "저장된 인보이스를 불러왔습니다. 수정 후 다시 저장하면 같은 번호의 파일을 덮어씁니다.",
@@ -341,6 +352,17 @@ LABELS = {
                                   "sidebar before filling the form."),
         "drive_save": "Save to Google Drive",
         "drive_list": "Open from Drive",
+        "draft_save": "Save draft (file)",
+        "draft_load": "Load a draft file",
+        "draft_loaded": "Draft loaded.",
+        "draft_hint": ("Downloads what you have typed as a JSON file. It works without "
+                       "signing in, and uploading it later picks up where you left off. "
+                       "The file holds the bank details you entered, so keep it somewhere "
+                       "you would keep an invoice."),
+        "draft_unreadable": "That file could not be read. Use a draft JSON downloaded from this app.",
+        "token_expired": ("The connection to Google Drive has expired. Sign in again **now** — "
+                          "if it expires while you are filling the form, your work goes with it."),
+        "sign_in_again": "Sign in again",
         "drive_pick": "Saved invoices",
         "drive_load": "Load",
         "drive_loaded": "Loaded a saved invoice. Saving it again replaces the file with the same number.",
@@ -391,6 +413,12 @@ def esc(value) -> str:
 def esc_lines(value) -> str:
     """Escape user text and keep its line breaks as paragraph line breaks."""
     return "<br/>".join(esc(line) for line in str(value).splitlines())
+
+
+def safe_draft_filename(invoice_no: str) -> str:
+    """A draft file named after the invoice, minus anything path-like."""
+    stem = safe_pdf_filename(invoice_no, "invoice")[:-4]
+    return f"draft-{stem}.json"
 
 
 def safe_pdf_filename(stem: str, fallback: str = "invoice") -> str:
@@ -829,6 +857,76 @@ def load_sample_into_form(ds_lang: str):
               "sample_loaded")
 
 
+def build_snapshot(ss) -> dict:
+    """The form as it stands, in the same shape a saved invoice has.
+
+    One format for both: a draft saved to disk and an invoice saved to Drive
+    are the same JSON, so either can be loaded back through fill_form().
+    Takes the state as an argument so it can be exercised without a session.
+    """
+    items = []
+    for row_id in ss.get("item_ids", []):
+        qty = ss.get(_item_key(row_id, "qty"), 1) or 0
+        price = ss.get(_item_key(row_id, "price"), 0.0) or 0.0
+        items.append({"name": ss.get(_item_key(row_id, "name"), ""),
+                      "qty": qty, "unit_price": price, "amount": qty * price})
+    subtotal = sum(item["amount"] for item in items)
+    try:
+        tax_rate = float(ss.get("tax_rate", 10.0))
+    except (TypeError, ValueError):
+        tax_rate = 10.0
+    return {
+        "invoice_no": ss.get("invoice_no", ""),
+        "issue_date": str(ss.get("issue_date", date.today())),
+        "due_date": str(ss.get("due_date", date.today())),
+        "from": {"company": ss.get("from_company", ""),
+                 "business_no": ss.get("from_bizno", ""),
+                 "address": ss.get("from_addr", ""),
+                 "email": ss.get("from_email", ""),
+                 "phone": ss.get("from_phone", "")},
+        "to": {"company": ss.get("to_company", ""),
+               "business_no": ss.get("to_bizno", ""),
+               "address": ss.get("to_addr", ""),
+               "email": ss.get("to_email", ""),
+               "phone": ss.get("to_phone", "")},
+        "items": items,
+        "subtotal": subtotal,
+        "tax_rate": tax_rate,
+        "tax": subtotal * tax_rate / 100,
+        "total": subtotal * (1 + tax_rate / 100),
+        "payment": {"bank": ss.get("bank_name", ""),
+                    "account_no": ss.get("account_no", ""),
+                    "holder": ss.get("account_holder", "")},
+        "notes": ss.get("notes", ""),
+    }
+
+
+def current_form_snapshot() -> dict:
+    return build_snapshot(st.session_state)
+
+
+def parse_draft(raw: bytes):
+    """A draft file as a dict, or None when it is not one of ours."""
+    try:
+        data = json.loads(bytes(raw).decode("utf-8"))
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def load_draft_file():
+    """Callback: restore a draft the person downloaded earlier."""
+    upload = st.session_state.get("draft_upload")
+    if upload is None:
+        return
+    data = parse_draft(upload.getvalue())
+    if data is None:
+        st.session_state.draft_error = True
+        return
+    st.session_state.pop("draft_error", None)
+    fill_form(data, "draft_loaded")
+
+
 def fetch_drive_invoices():
     """Callback: ask Drive what this person has saved before."""
     try:
@@ -1012,6 +1110,16 @@ st.caption(L["subtitle"])
 if not auth.is_signed_in() and drive.is_configured():
     st.info(f"🔑 {L['anon_banner']}")
 
+# The token lasts about an hour and Streamlit never refreshes it. Ask once
+# per session, while re-authenticating is still free.
+if auth.is_signed_in() and drive.is_configured():
+    if "drive_token_live" not in st.session_state:
+        st.session_state.drive_token_live = drive.token_is_live()
+    if not st.session_state.drive_token_live:
+        st.warning(f"⏳ {L['token_expired']}")
+        if st.button(f"🔑 {L['sign_in_again']}", key="reauth_btn"):
+            auth.begin_sign_in()
+
 # KRW amounts belong with the Korean sample; every other currency gets the
 # international one, whatever the UI language is.
 sample_dataset = "ko" if currency == "KRW" else "en"
@@ -1051,6 +1159,8 @@ with tab_create:
     notice = st.session_state.pop("form_notice", None)
     if notice == "sample_loaded":
         st.success(f"✅ {L['sample_loaded']}")
+    elif notice == "draft_loaded":
+        st.success(f"✅ {L['draft_loaded']}")
     elif notice == "drive_loaded":
         st.success(f"✅ {L['drive_loaded']}")
     elif notice == "cleared":
@@ -1067,6 +1177,25 @@ with tab_create:
                   on_click=reset_form, use_container_width=True)
     with tb3:
         st.caption(L["form_hint"])
+
+    # --- Keep working later: a draft file, and Drive for signed-in people ---
+    dc1, dc2 = st.columns([1.2, 2.4], vertical_alignment="bottom")
+    with dc1:
+        st.download_button(
+            f"📝 {L['draft_save']}",
+            data=json.dumps(current_form_snapshot(), ensure_ascii=False,
+                            indent=2).encode("utf-8"),
+            file_name=safe_draft_filename(st.session_state.get("invoice_no", "")),
+            mime="application/json",
+            key="draft_download",
+            use_container_width=True,
+            help=L["draft_hint"],
+        )
+    with dc2:
+        st.file_uploader(L["draft_load"], type="json", key="draft_upload",
+                         on_change=load_draft_file, label_visibility="collapsed")
+    if st.session_state.get("draft_error"):
+        st.caption(f"⚠️ {L['draft_unreadable']}")
 
     # --- Reopen a past invoice: the reason the form data is saved at all ---
     if drive.is_configured():
@@ -1322,6 +1451,8 @@ with tab_create:
                     st.session_state.pop("drive_error", None)
                 except drive.DriveError as exc:
                     st.session_state.drive_error = exc.code
+                    if exc.code == "expired":
+                        st.session_state.drive_token_live = False
                     st.session_state.pop("drive_result", None)
                 st.rerun()
         with dl_col:
