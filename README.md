@@ -41,9 +41,11 @@ invoice, and reopening a past one. That keeps the tool usable (and indexable)
 for a first-time visitor while still giving returning users somewhere to keep
 their work.
 
-`allow_any_google_account` must be a real boolean `true` — the string `"true"`
-does not open the app, so a quoting slip cannot unlock it by accident. With
-neither set the app stays locked: opening it up is a decision, never the
+Both flags must be a real boolean `true` — the string `"true"` does not open
+the app, so a quoting slip cannot unlock it by accident. `allow_anonymous_use`
+takes precedence, so adding it alongside an `allowed_emails` list makes the app
+public rather than combining the two. With none of the three set the app stays
+locked: opening it up is a decision, never the
 result of a missing setting. Each person's invoices go to their own Drive
 either way, so the open mode does not make the operator a custodian of anyone
 else's bank details.

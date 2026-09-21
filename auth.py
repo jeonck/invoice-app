@@ -32,10 +32,13 @@ Or limited to named addresses (a private tool)::
     [app_auth]
     allowed_emails = ["you@example.com"]
 
-Configure exactly one of the two. Missing OIDC config, or neither of these,
-fails closed: the app refuses to render the invoice form rather than serving
-it to whoever arrives — opening it up is a decision someone has to make on
-purpose, never the result of a missing setting.
+Set exactly one of the three. If ``allow_anonymous_use`` is on it wins over
+the others, so adding it to an app that has an allowlist makes that app
+public — which is the point, but worth knowing before adding it "just to
+test". Missing OIDC config, or none of the three, fails closed: the app
+refuses to render the invoice form rather than serving it to whoever
+arrives. Opening it up is a decision someone has to make on purpose, never
+the result of a missing setting.
 """
 
 import streamlit as st
