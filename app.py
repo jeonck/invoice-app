@@ -17,6 +17,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 from xml.sax.saxutils import escape as _xml_escape
 
+import auth
+
 # ---------------------------------------------------------------------------
 # 한글 폰트 등록
 #
@@ -203,6 +205,19 @@ LABELS = {
         "generated": "인보이스가 생성되었습니다.",
         "font_warning": "한글 폰트를 불러오지 못했습니다. PDF의 한글이 네모로 표시될 수 있습니다. fonts/NanumGothic-Regular.ttf 파일이 저장소에 포함되어 있는지 확인하세요.",
         "payment_notice": "계좌정보는 서버에 저장되지 않고 현재 브라우저 세션에서만 유지되며, '전체 지우기'를 누르면 즉시 삭제됩니다. 다만 생성된 PDF는 암호화되지 않으니 전달 경로에 주의하세요.",
+        "login_title": "로그인",
+        "login_caption": "이 인보이스 도구는 등록된 사용자만 사용할 수 있습니다.",
+        "login_user": "사용자명",
+        "login_password": "비밀번호",
+        "login_submit": "로그인",
+        "login_failed": "사용자명 또는 비밀번호가 올바르지 않습니다.",
+        "login_locked": "로그인 시도가 너무 많습니다. {seconds}초 후 다시 시도하세요.",
+        "login_setup_title": "로그인 설정이 필요합니다",
+        "login_setup_body": ("계정이 하나도 설정되지 않아 앱을 잠근 상태입니다. "
+                             "아래 명령으로 비밀번호 해시를 만들어 `.streamlit/secrets.toml` "
+                             "(Streamlit Cloud는 **Settings → Secrets**)에 추가하세요. "
+                             "비밀번호 원문은 어디에도 저장되지 않습니다."),
+        "logout": "로그아웃",
         "ph_from_company": "우리 회사 이름",
         "ph_to_company": "청구할 거래처 이름",
         "ph_bizno": "123-45-67890",
@@ -268,6 +283,19 @@ LABELS = {
         "generated": "Invoice generated.",
         "font_warning": "The Korean font could not be loaded, so Korean text may appear as empty boxes in the PDF. Check that fonts/NanumGothic-Regular.ttf is present in the repository.",
         "payment_notice": "Bank details are not stored on the server — they live only in this browser session and are erased by 'Clear all'. The generated PDF itself is not encrypted, so be deliberate about how you send it.",
+        "login_title": "Sign in",
+        "login_caption": "This invoice tool is limited to registered users.",
+        "login_user": "Username",
+        "login_password": "Password",
+        "login_submit": "Sign in",
+        "login_failed": "That username or password is not correct.",
+        "login_locked": "Too many attempts. Try again in {seconds} seconds.",
+        "login_setup_title": "Login is not configured yet",
+        "login_setup_body": ("No account is configured, so the app is locked. Generate a "
+                             "password hash with the command below and put it in "
+                             "`.streamlit/secrets.toml` (on Streamlit Cloud: "
+                             "**Settings → Secrets**). The password itself is never stored."),
+        "logout": "Sign out",
         "ph_from_company": "Your company name",
         "ph_to_company": "Client company name",
         "ph_bizno": "EIN 00-0000000",
@@ -822,16 +850,34 @@ FORM_CSS = """
 st.set_page_config(page_title="Invoice Generator", page_icon="📄", layout="wide")
 st.markdown(FORM_CSS, unsafe_allow_html=True)
 
-# --- Sidebar ---
+# --- Sidebar (language only until the session is signed in) ---
 with st.sidebar:
     lang = st.selectbox("🌐 Language / 언어", ["한국어", "English"],
                         key="lang_select")
     lang_code = "ko" if lang == "한국어" else "en"
     L = LABELS[lang_code]
 
+# --- Login gate: nothing below this line renders for a signed-out visitor ---
+if not auth.require_login(L):
+    st.stop()
+
+
+def sign_out():
+    """Callback: log out, leaving no invoice data behind in the session."""
+    reset_form()
+    st.session_state.pop("form_notice", None)
+    auth.logout()
+
+
+with st.sidebar:
     currency = st.selectbox(f"💱 {L['currency']}",
                             list(CURRENCY_SYMBOLS.keys()), key="currency_select")
     sym = CURRENCY_SYMBOLS[currency]
+
+    st.divider()
+    st.caption(f"👤 {auth.current_user()}")
+    st.button(f"🚪 {L['logout']}", key="logout_btn",
+              on_click=sign_out, use_container_width=True)
 
 st.title(f"📄 {L['title']}")
 st.caption(L["subtitle"])
