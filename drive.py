@@ -23,6 +23,7 @@ import httpx
 import streamlit as st
 
 SCOPE = "https://www.googleapis.com/auth/drive.file"
+PROVIDER = "google"
 FILES_URL = "https://www.googleapis.com/drive/v3/files"
 UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 FOLDER_MIME = "application/vnd.google-apps.folder"
@@ -47,8 +48,31 @@ def access_token() -> str:
         return ""
 
 
+def is_configured() -> bool:
+    """True when the operator has set Drive saving up at all.
+
+    Distinct from having a token: an anonymous visitor on a correctly
+    configured app has no token yet, and the answer to that is "sign in",
+    not "ask the operator to fix the settings".
+    """
+    try:
+        auth_section = st.secrets["auth"]
+    except Exception:
+        return False
+    exposed = auth_section.get("expose_tokens") or []
+    if isinstance(exposed, str):
+        exposed = [exposed]
+    if "access" not in [str(item) for item in exposed]:
+        return False
+    try:
+        scope = str(auth_section[PROVIDER].get("client_kwargs", {}).get("scope", ""))
+    except Exception:
+        return False
+    return SCOPE in scope
+
+
 def is_available() -> bool:
-    """True when secrets expose a token, i.e. Drive saving can be attempted."""
+    """True when a token is in hand, i.e. saving can be attempted now."""
     return bool(access_token())
 
 
@@ -128,6 +152,55 @@ def _put_file(name: str, data: bytes, mime: str, token: str, parent: str) -> dic
     return _request("POST", UPLOAD_URL, token, content=body, headers=headers,
                     params={"uploadType": "multipart",
                             "fields": "id,name,webViewLink"})
+
+
+def list_invoices(limit: int = 25) -> list:
+    """Saved invoices, newest first, as [{id, name, modified}].
+
+    The drive.file scope only ever sees files this app created, so a search
+    for its own JSON needs no folder walking — and cannot turn up anything
+    else in the person's Drive.
+    """
+    token = access_token()
+    if not token:
+        raise DriveError("unavailable")
+    payload = _request("GET", FILES_URL, token, params={
+        "q": "mimeType = 'application/json' and trashed = false",
+        "fields": "files(id,name,modifiedTime)",
+        "orderBy": "modifiedTime desc",
+        "pageSize": max(1, min(int(limit), 100)),
+        "spaces": "drive",
+    })
+    return [
+        {"id": f.get("id", ""),
+         "name": str(f.get("name", "")).removesuffix(".json"),
+         "modified": str(f.get("modifiedTime", ""))[:10]}
+        for f in (payload.get("files") or []) if f.get("id")
+    ]
+
+
+def load_invoice(file_id: str) -> dict:
+    """Read one saved invoice back as the dict the form was filled with."""
+    token = access_token()
+    if not token:
+        raise DriveError("unavailable")
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = httpx.get(f"{FILES_URL}/{file_id}", headers=headers,
+                             params={"alt": "media"}, timeout=TIMEOUT)
+    except httpx.HTTPError as exc:
+        raise DriveError("network", str(exc))
+    if response.status_code in (401, 403):
+        raise DriveError("expired", response.text[:200])
+    if response.status_code >= 400:
+        raise DriveError("http", f"{response.status_code} {response.text[:200]}")
+    try:
+        data = json.loads(response.content.decode("utf-8"))
+    except Exception as exc:
+        raise DriveError("unreadable", str(exc))
+    if not isinstance(data, dict):
+        raise DriveError("unreadable", "not an invoice")
+    return data
 
 
 def save_invoice(pdf_bytes: bytes, invoice_data: dict, stem: str, year) -> dict:

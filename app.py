@@ -222,7 +222,23 @@ LABELS = {
                                  "방문자 누구나 쓰게 하려면 `allow_any_google_account`를, "
                                  "특정 인원만 쓰게 하려면 `allowed_emails`를 설정하세요."),
         "logout": "로그아웃",
+        "sign_in": "Google 로그인",
+        "sign_in_why": "로그인하면 인보이스를 내 Google Drive에 저장하고, 전에 저장한 것을 불러올 수 있습니다.",
+        "anon_banner": ("로그인 없이 인보이스를 만들고 PDF로 받을 수 있습니다. "
+                        "완성본을 **내 Google Drive에 저장**하려면 로그인하세요 — "
+                        "저장은 본인 계정으로 이뤄지고, 이 앱은 아무것도 보관하지 않습니다."),
+        "drive_sign_in_save": "로그인하고 Drive에 저장",
+        "drive_sign_in_warning": ("로그인하면 페이지가 새로고침되어 **지금 입력한 내용이 사라집니다.** "
+                                  "먼저 PDF를 내려받으시고, 저장까지 하실 거면 작성 전에 "
+                                  "왼쪽에서 로그인하세요."),
         "drive_save": "Google Drive에 저장",
+        "drive_list": "Drive에서 불러오기",
+        "drive_pick": "저장된 인보이스",
+        "drive_load": "불러오기",
+        "drive_loaded": "저장된 인보이스를 불러왔습니다. 수정 후 다시 저장하면 같은 번호의 파일을 덮어씁니다.",
+        "drive_list_empty": "아직 Drive에 저장한 인보이스가 없습니다.",
+        "drive_list_sign_in": "로그인하면 전에 저장한 인보이스를 불러와 그대로 수정할 수 있습니다.",
+        "drive_err_unreadable": "저장된 파일을 읽지 못했습니다. 파일이 손상되었을 수 있습니다.",
         "drive_saved": "Drive의 Invoices 폴더에 PDF와 입력 데이터를 저장했습니다.",
         "drive_open": "Drive에서 열기",
         "drive_unavailable": ("Google Drive 저장은 secrets에 Drive 권한(scope)과 "
@@ -314,7 +330,23 @@ LABELS = {
                                  "Set `allow_any_google_account` to offer it to every "
                                  "visitor, or `allowed_emails` to keep it to a few people."),
         "logout": "Sign out",
+        "sign_in": "Sign in with Google",
+        "sign_in_why": "Sign in to save invoices to your own Google Drive, and reopen past ones.",
+        "anon_banner": ("You can write an invoice and download the PDF without signing in. "
+                        "Sign in to **save it to your own Google Drive** — the file is "
+                        "created under your account, and this app keeps nothing."),
+        "drive_sign_in_save": "Sign in and save to Drive",
+        "drive_sign_in_warning": ("Signing in reloads the page, which **clears what you have "
+                                  "typed.** Download the PDF first, or sign in from the "
+                                  "sidebar before filling the form."),
         "drive_save": "Save to Google Drive",
+        "drive_list": "Open from Drive",
+        "drive_pick": "Saved invoices",
+        "drive_load": "Load",
+        "drive_loaded": "Loaded a saved invoice. Saving it again replaces the file with the same number.",
+        "drive_list_empty": "Nothing saved to Drive yet.",
+        "drive_list_sign_in": "Sign in to reopen an invoice you saved before and edit it.",
+        "drive_err_unreadable": "That saved file could not be read — it may be damaged.",
         "drive_saved": "Saved the PDF and its form data to the Invoices folder in Drive.",
         "drive_open": "Open in Drive",
         "drive_unavailable": ("Saving to Google Drive needs the Drive scope and "
@@ -735,34 +767,93 @@ def reset_form():
     st.session_state.form_notice = "cleared"
 
 
-def load_sample_into_form(ds_lang: str):
-    """Callback: fill every field with the sample invoice content."""
-    data = get_sample_data(ds_lang, st.session_state.get("currency_select", "KRW"))
+def _as_date(value, fallback):
+    """Dates come back from Drive as whatever was in the file — be careful."""
+    try:
+        return date.fromisoformat(str(value))
+    except Exception:
+        return fallback
+
+
+def fill_form(data: dict, notice: str):
+    """Put a whole invoice into the form: the sample, or one loaded back.
+
+    Values from Drive are the app's own JSON, but they have been outside the
+    app, so nothing here assumes a key exists or has the right type.
+    """
     ss = st.session_state
     init_form_state()
 
     _drop_rows()
-    for item in data["items"]:
-        _add_row(item["name"], item["qty"], item["unit_price"])
+    for item in (data.get("items") or []):
+        if not isinstance(item, dict):
+            continue
+        try:
+            _add_row(str(item.get("name", "")),
+                     int(item.get("qty", 1) or 1),
+                     float(item.get("unit_price", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    if not ss.item_ids:
+        _add_row()
 
-    ss.invoice_no = data["invoice_no"]
-    ss.issue_date = date.fromisoformat(data["issue_date"])
-    ss.due_date = date.fromisoformat(data["due_date"])
-    for side, prefix in (("from", "from"), ("to", "to")):
-        party = data[side]
-        ss[f"{prefix}_company"] = party["company"]
-        ss[f"{prefix}_bizno"] = party["business_no"]
-        ss[f"{prefix}_addr"] = party["address"]
-        ss[f"{prefix}_email"] = party["email"]
-        ss[f"{prefix}_phone"] = party["phone"]
-    ss.tax_rate = float(data["tax_rate"])
-    ss.bank_name = data["payment"]["bank"]
-    ss.account_no = data["payment"]["account_no"]
-    ss.account_holder = data["payment"]["holder"]
-    ss.notes = data["notes"]
-    ss.pop("pdf_bytes", None)
-    ss.pop("pdf_name", None)
-    ss.form_notice = "sample_loaded"
+    ss.invoice_no = str(data.get("invoice_no", "") or "")
+    ss.issue_date = _as_date(data.get("issue_date"), date.today())
+    ss.due_date = _as_date(data.get("due_date"), date.today() + timedelta(days=30))
+    for side in ("from", "to"):
+        party = data.get(side) or {}
+        party = party if isinstance(party, dict) else {}
+        ss[f"{side}_company"] = str(party.get("company", "") or "")
+        ss[f"{side}_bizno"] = str(party.get("business_no", "") or "")
+        ss[f"{side}_addr"] = str(party.get("address", "") or "")
+        ss[f"{side}_email"] = str(party.get("email", "") or "")
+        ss[f"{side}_phone"] = str(party.get("phone", "") or "")
+    try:
+        ss.tax_rate = min(100.0, max(0.0, float(data.get("tax_rate", 10.0))))
+    except (TypeError, ValueError):
+        ss.tax_rate = 10.0
+    payment = data.get("payment") or {}
+    payment = payment if isinstance(payment, dict) else {}
+    ss.bank_name = str(payment.get("bank", "") or "")
+    ss.account_no = str(payment.get("account_no", "") or "")
+    ss.account_holder = str(payment.get("holder", "") or "")
+    ss.notes = str(data.get("notes", "") or "")
+    for key in ("pdf_bytes", "pdf_name", "pdf_data", "drive_result", "drive_error"):
+        ss.pop(key, None)
+    ss.form_notice = notice
+
+
+def load_sample_into_form(ds_lang: str):
+    """Callback: fill every field with the sample invoice content."""
+    fill_form(get_sample_data(ds_lang, st.session_state.get("currency_select", "KRW")),
+              "sample_loaded")
+
+
+def fetch_drive_invoices():
+    """Callback: ask Drive what this person has saved before."""
+    try:
+        st.session_state.drive_files = drive.list_invoices()
+        st.session_state.pop("drive_error", None)
+    except drive.DriveError as exc:
+        st.session_state.drive_error = exc.code
+        st.session_state.drive_files = []
+
+
+def load_from_drive():
+    """Callback: pull the picked invoice back into the form."""
+    picked = st.session_state.get("drive_pick")
+    chosen = next((f for f in st.session_state.get("drive_files", [])
+                   if _drive_label(f) == picked), None)
+    if not chosen:
+        return
+    try:
+        fill_form(drive.load_invoice(chosen["id"]), "drive_loaded")
+    except drive.DriveError as exc:
+        st.session_state.drive_error = exc.code
+
+
+def _drive_label(entry: dict) -> str:
+    return f"{entry.get('name', '')}  ·  {entry.get('modified', '')}"
 
 
 def append_row():
@@ -905,12 +996,21 @@ with st.sidebar:
     sym = CURRENCY_SYMBOLS[currency]
 
     st.divider()
-    st.caption(f"👤 {auth.current_user()}")
-    st.button(f"🚪 {L['logout']}", key="logout_btn",
-              on_click=sign_out, use_container_width=True)
+    if auth.is_signed_in():
+        st.caption(f"👤 {auth.current_user()}")
+        st.button(f"🚪 {L['logout']}", key="logout_btn",
+                  on_click=sign_out, use_container_width=True)
+    else:
+        st.caption(L["sign_in_why"])
+        if st.button(f"🔑 {L['sign_in']}", key="sidebar_login_btn",
+                     use_container_width=True):
+            auth.begin_sign_in()
 
 st.title(f"📄 {L['title']}")
 st.caption(L["subtitle"])
+
+if not auth.is_signed_in() and drive.is_configured():
+    st.info(f"🔑 {L['anon_banner']}")
 
 # KRW amounts belong with the Korean sample; every other currency gets the
 # international one, whatever the UI language is.
@@ -951,6 +1051,8 @@ with tab_create:
     notice = st.session_state.pop("form_notice", None)
     if notice == "sample_loaded":
         st.success(f"✅ {L['sample_loaded']}")
+    elif notice == "drive_loaded":
+        st.success(f"✅ {L['drive_loaded']}")
     elif notice == "cleared":
         st.info(f"🧹 {L['form_cleared']}")
 
@@ -965,6 +1067,27 @@ with tab_create:
                   on_click=reset_form, use_container_width=True)
     with tb3:
         st.caption(L["form_hint"])
+
+    # --- Reopen a past invoice: the reason the form data is saved at all ---
+    if drive.is_configured():
+        if drive.is_available():
+            lc1, lc2, lc3 = st.columns([1.1, 2.6, 1], vertical_alignment="bottom")
+            with lc1:
+                st.button(f"📂 {L['drive_list']}", key="drive_list_btn",
+                          on_click=fetch_drive_invoices, use_container_width=True)
+            saved = st.session_state.get("drive_files")
+            if saved:
+                with lc2:
+                    st.selectbox(L["drive_pick"], [_drive_label(f) for f in saved],
+                                 key="drive_pick", label_visibility="collapsed")
+                with lc3:
+                    st.button(f"↻ {L['drive_load']}", key="drive_load_btn",
+                              on_click=load_from_drive, use_container_width=True)
+            elif saved is not None:
+                with lc2:
+                    st.caption(L["drive_list_empty"])
+        elif not auth.is_signed_in():
+            st.caption(f"🔑 {L['drive_list_sign_in']}")
 
     # ================= The invoice document =================
     with st.container(border=True):
@@ -1176,11 +1299,18 @@ with tab_create:
         render_pdf_preview(st.session_state.pdf_bytes)
 
         drive_col, dl_col = st.columns(2)
+        signed_in = auth.is_signed_in()
         with drive_col:
-            drive_ready = drive.is_available()
-            if st.button(f"💾 {L['drive_save']}", key="drive_save_btn",
-                         type="primary", use_container_width=True,
-                         disabled=not drive_ready):
+            if drive.is_configured() and not signed_in:
+                # Signing in navigates away and back, which starts a fresh
+                # Streamlit session — the form does not survive it.
+                if st.button(f"🔐 {L['drive_sign_in_save']}",
+                             key="drive_signin_btn", type="primary",
+                             use_container_width=True):
+                    auth.begin_sign_in()
+            elif st.button(f"💾 {L['drive_save']}", key="drive_save_btn",
+                           type="primary", use_container_width=True,
+                           disabled=not drive.is_available()):
                 stem = st.session_state.get("pdf_name", "invoice.pdf")[:-4]
                 try:
                     st.session_state.drive_result = drive.save_invoice(
@@ -1204,8 +1334,10 @@ with tab_create:
                 use_container_width=True,
             )
 
-        if not drive.is_available():
+        if not drive.is_configured():
             st.caption(f"ℹ️ {L['drive_unavailable']}")
+        elif not signed_in:
+            st.caption(f"⚠️ {L['drive_sign_in_warning']}")
 
         saved = st.session_state.get("drive_result")
         if saved:

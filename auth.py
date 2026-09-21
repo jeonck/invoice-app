@@ -5,8 +5,14 @@ the part OIDC does not give you — **a decision about who may use the app**.
 Any Google account in the world can complete the sign-in flow, so the email
 that comes back is checked against what this app is configured to admit:
 
-Open to anyone who signs in (a tool offered to visitors, where each person's
-invoices go to their own Drive)::
+Open to everyone, no sign-in needed (a tool offered to visitors: they write
+an invoice and download it; signing in is only how they save it to their own
+Drive)::
+
+    [app_auth]
+    allow_anonymous_use = true
+
+Open to anyone who signs in, but sign-in required::
 
     [app_auth]
     allow_any_google_account = true
@@ -80,21 +86,41 @@ def signed_in_email() -> str:
     return str(_claim("email", "") or "").strip().lower()
 
 
-def open_to_anyone() -> bool:
-    """True when any signed-in Google account may use the app."""
+def _flag(name: str) -> bool:
+    """Read a boolean access flag. Only a real `true` counts, so a quoted
+    "true" in the secrets cannot open the app by accident."""
     try:
-        return st.secrets["app_auth"]["allow_any_google_account"] is True
+        return st.secrets["app_auth"][name] is True
     except Exception:
         return False
 
 
+def open_to_anyone() -> bool:
+    """True when any signed-in Google account may use the app."""
+    return _flag("allow_any_google_account")
+
+
+def anonymous_use() -> bool:
+    """True when the app is usable without signing in at all."""
+    return _flag("allow_anonymous_use")
+
+
 def access_configured() -> bool:
-    """True when the app has been told who it admits, either way."""
-    return open_to_anyone() or bool(allowed_emails())
+    """True when the app has been told who it serves, in any of the modes."""
+    return anonymous_use() or open_to_anyone() or bool(allowed_emails())
 
 
 def is_allowed(email: str) -> bool:
-    return bool(email) and (open_to_anyone() or email in allowed_emails())
+    if not email:
+        return False
+    # Signing in on a public tool exists to reach the person's own Drive, so
+    # there is nothing for an allowlist to protect there.
+    return anonymous_use() or open_to_anyone() or email in allowed_emails()
+
+
+def begin_sign_in():
+    """Start the OIDC redirect. Only ever from a click — it navigates away."""
+    st.login(PROVIDER)
 
 
 def current_user():
@@ -137,11 +163,18 @@ def require_login(L) -> bool:
         st.error(f"\N{LOCK} {L['login_allowlist_title']}")
         st.markdown(L["login_allowlist_body"])
         st.code('[app_auth]\n'
-                '# either: open to anyone who signs in\n'
+                '# no sign-in needed; sign in only to save to Drive\n'
+                'allow_anonymous_use = true\n\n'
+                '# or: sign-in required, any Google account\n'
                 'allow_any_google_account = true\n\n'
                 '# or: only these addresses\n'
                 'allowed_emails = ["you@example.com"]\n', language="toml")
         return False
+
+    # A public tool renders for everyone; signing in is optional and only
+    # unlocks saving to Drive.
+    if anonymous_use():
+        return True
 
     _, middle, _ = st.columns([1, 1.6, 1])
     with middle:

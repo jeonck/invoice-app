@@ -28,10 +28,18 @@ told who it serves. Two ways, and one of them must be set:
 
 ```toml
 [app_auth]
-allow_any_google_account = true            # a tool offered to visitors
+allow_anonymous_use = true                 # public tool: no sign-in to write and download
+# or
+allow_any_google_account = true            # sign-in required, any Google account
 # or
 allowed_emails = ["you@example.com"]       # a private tool
 ```
+
+With `allow_anonymous_use`, writing an invoice and downloading the PDF needs
+no account at all, and signing in is what unlocks Drive — saving a finished
+invoice, and reopening a past one. That keeps the tool usable (and indexable)
+for a first-time visitor while still giving returning users somewhere to keep
+their work.
 
 `allow_any_google_account` must be a real boolean `true` — the string `"true"`
 does not open the app, so a quoting slip cannot unlock it by accident. With
@@ -73,9 +81,16 @@ cannot collide with the `[auth]` section that Streamlit's OIDC support owns.
 ## Saving invoices to Google Drive (optional)
 
 A generated invoice can be saved to **the signed-in person's own Drive** —
-`Invoices/<year>/INV-....pdf` plus `INV-....json`, the form data, so an invoice
-can be loaded back and reissued later. Saving the same invoice number again
-replaces those two files instead of piling up copies.
+`Invoices/<year>/INV-....pdf` plus `INV-....json`, the form data. **Open from
+Drive** in the create tab lists what was saved before and puts any of it back
+into the form, which is what makes a recurring invoice a two-minute job rather
+than a retype. Saving the same invoice number again replaces those two files
+instead of piling up copies.
+
+Signing in mid-session costs the form: the OIDC round trip reloads the page and
+Streamlit starts a fresh session. The app warns about that before the redirect,
+and anyone who means to save or reopen is better off signing in first — which
+is exactly what the sidebar invites them to do.
 
 It needs the two lines marked above (`expose_tokens` and the `drive.file`
 scope) and the Google Drive API enabled on the same project — see

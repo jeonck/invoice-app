@@ -136,8 +136,9 @@ client_kwargs = { scope = "openid email profile https://www.googleapis.com/auth/
 
 [app_auth]
 allowed_emails = ["you@example.com"]       # 실제로 이 앱을 쓸 사람
-# 또는, 방문자 누구나 쓰게 하려면 위 줄 대신:
-# allow_any_google_account = true
+# 또는, 위 줄 대신 아래 중 하나:
+# allow_anonymous_use = true               # 로그인 없이 작성·다운로드, 저장/불러오기만 로그인
+# allow_any_google_account = true          # 로그인 필수, 구글 계정이면 누구나
 ```
 
 핵심만 짚으면:
