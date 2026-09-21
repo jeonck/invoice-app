@@ -221,10 +221,11 @@ LABELS = {
                                 "저장한 인보이스를 불러와 수정하면 됩니다. "
                                 "매달 반복되는 청구가 몇 분이면 끝납니다."),
         "login_preview_note": "아래는 이 도구로 만든 샘플 인보이스입니다.",
-        "login_denied": ("{email} 계정에는 사용 권한이 없습니다. "
-                         "허용 목록에 추가된 계정으로 다시 로그인하세요."),
+        "login_denied": ("`{email}` 계정은 아직 등록되지 않았습니다. "
+                         "등록된 계정만 이 도구를 사용할 수 있습니다."),
         "login_setup_title": "Google 로그인 설정이 필요합니다",
-        "login_denied_contact": "사용을 원하시면 {link} 으로 연락해 주세요.",
+        "login_denied_contact": ("사용을 원하시면 {link} 으로 메일을 보내주세요. "
+                                 "위에 표시된 주소를 그대로 등록해 드립니다."),
         "login_setup_body": ("OIDC 설정이 없어 앱을 잠근 상태입니다. Google Cloud Console에서 "
                              "OAuth 클라이언트를 만든 뒤 아래 내용을 `.streamlit/secrets.toml` "
                              "(Streamlit Cloud는 **Settings → Secrets**)에 추가하세요. "
@@ -353,10 +354,11 @@ LABELS = {
                                 "Load a past invoice, change what differs, save it again. "
                                 "A recurring bill takes minutes."),
         "login_preview_note": "Below is a sample invoice made with this tool.",
-        "login_denied": ("{email} is not approved for this app. "
-                         "Sign in with an address on the allowlist."),
+        "login_denied": ("`{email}` is not registered yet. "
+                         "This tool is limited to registered accounts."),
         "login_setup_title": "Google sign-in is not configured yet",
-        "login_denied_contact": "To ask for access, write to {link}.",
+        "login_denied_contact": ("To ask for access, email {link} — mention the "
+                                 "address shown above and it will be added."),
         "login_setup_body": ("No OIDC configuration was found, so the app is locked. Create "
                              "an OAuth client in the Google Cloud Console, then add the "
                              "settings below to `.streamlit/secrets.toml` (on Streamlit "
