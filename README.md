@@ -19,12 +19,26 @@ install from `requirements.txt` rather than by package name.
 ## Sign-in (required)
 
 The app is gated by **Google sign-in** and **fails closed**: with no OIDC
-configuration, or with an empty allowlist, it refuses to render the invoice
+configuration, or with nobody configured to use it, it refuses to render the invoice
 form and shows what is missing instead. Bank details go into this form, so it
 should never be an open page on the internet.
 
-Google sign-in on its own admits *any* Google account — `allowed_emails` is
-what limits the app to you, so both halves are required.
+Google sign-in on its own admits *any* Google account, so the app has to be
+told who it serves. Two ways, and one of them must be set:
+
+```toml
+[app_auth]
+allow_any_google_account = true            # a tool offered to visitors
+# or
+allowed_emails = ["you@example.com"]       # a private tool
+```
+
+`allow_any_google_account` must be a real boolean `true` — the string `"true"`
+does not open the app, so a quoting slip cannot unlock it by accident. With
+neither set the app stays locked: opening it up is a decision, never the
+result of a missing setting. Each person's invoices go to their own Drive
+either way, so the open mode does not make the operator a custodian of anyone
+else's bank details.
 
 **[docs/google-setup.md](docs/google-setup.md) walks through the whole setup**
 (in Korean): the OAuth client, the consent screen, the `403: access_denied`
@@ -44,7 +58,7 @@ server_metadata_url = "https://accounts.google.com/.well-known/openid-configurat
 client_kwargs = { scope = "openid email profile https://www.googleapis.com/auth/drive.file" }
 
 [app_auth]
-allowed_emails = ["you@example.com"]       # who may actually use the app
+allowed_emails = ["you@example.com"]       # or allow_any_google_account = true
 ```
 
 An address is admitted only when Google reports it as verified and it appears

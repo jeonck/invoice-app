@@ -216,10 +216,11 @@ LABELS = {
                              "OAuth 클라이언트를 만든 뒤 아래 내용을 `.streamlit/secrets.toml` "
                              "(Streamlit Cloud는 **Settings → Secrets**)에 추가하세요. "
                              "설정 방법은 README를 참고하세요."),
-        "login_allowlist_title": "허용 계정 목록이 비어 있습니다",
+        "login_allowlist_title": "사용 대상이 설정되지 않았습니다",
         "login_allowlist_body": ("Google 로그인만으로는 어떤 Google 계정이든 들어올 수 있어, "
-                                 "허용 목록이 비어 있으면 앱을 잠급니다. "
-                                 "사용할 이메일 주소를 추가하세요."),
+                                 "사용 대상을 정하기 전까지 앱을 잠급니다. "
+                                 "방문자 누구나 쓰게 하려면 `allow_any_google_account`를, "
+                                 "특정 인원만 쓰게 하려면 `allowed_emails`를 설정하세요."),
         "logout": "로그아웃",
         "drive_save": "Google Drive에 저장",
         "drive_saved": "Drive의 Invoices 폴더에 PDF와 입력 데이터를 저장했습니다.",
@@ -307,10 +308,11 @@ LABELS = {
                              "an OAuth client in the Google Cloud Console, then add the "
                              "settings below to `.streamlit/secrets.toml` (on Streamlit "
                              "Cloud: **Settings → Secrets**). The README has the steps."),
-        "login_allowlist_title": "The allowlist is empty",
+        "login_allowlist_title": "Nobody is configured to use this app",
         "login_allowlist_body": ("Google sign-in on its own would admit any Google account, "
-                                 "so an empty allowlist keeps the app locked. Add the "
-                                 "addresses that may use it."),
+                                 "so the app stays locked until it is told who it serves. "
+                                 "Set `allow_any_google_account` to offer it to every "
+                                 "visitor, or `allowed_emails` to keep it to a few people."),
         "logout": "Sign out",
         "drive_save": "Save to Google Drive",
         "drive_saved": "Saved the PDF and its form data to the Invoices folder in Drive.",
@@ -1173,20 +1175,12 @@ with tab_create:
         st.markdown(f"#### {L['preview']}")
         render_pdf_preview(st.session_state.pdf_bytes)
 
-        dl_col, drive_col = st.columns(2)
-        with dl_col:
-            st.download_button(
-                label=f"⬇️ {L['download']}",
-                data=st.session_state.pdf_bytes,
-                file_name=st.session_state.get("pdf_name", "invoice.pdf"),
-                mime="application/pdf",
-                key="created_download",
-                use_container_width=True,
-            )
+        drive_col, dl_col = st.columns(2)
         with drive_col:
             drive_ready = drive.is_available()
             if st.button(f"💾 {L['drive_save']}", key="drive_save_btn",
-                         use_container_width=True, disabled=not drive_ready):
+                         type="primary", use_container_width=True,
+                         disabled=not drive_ready):
                 stem = st.session_state.get("pdf_name", "invoice.pdf")[:-4]
                 try:
                     st.session_state.drive_result = drive.save_invoice(
@@ -1200,6 +1194,15 @@ with tab_create:
                     st.session_state.drive_error = exc.code
                     st.session_state.pop("drive_result", None)
                 st.rerun()
+        with dl_col:
+            st.download_button(
+                label=f"⬇️ {L['download']}",
+                data=st.session_state.pdf_bytes,
+                file_name=st.session_state.get("pdf_name", "invoice.pdf"),
+                mime="application/pdf",
+                key="created_download",
+                use_container_width=True,
+            )
 
         if not drive.is_available():
             st.caption(f"ℹ️ {L['drive_unavailable']}")

@@ -136,15 +136,20 @@ client_kwargs = { scope = "openid email profile https://www.googleapis.com/auth/
 
 [app_auth]
 allowed_emails = ["you@example.com"]       # 실제로 이 앱을 쓸 사람
+# 또는, 방문자 누구나 쓰게 하려면 위 줄 대신:
+# allow_any_google_account = true
 ```
 
 핵심만 짚으면:
 
 - **`redirect_uri`는 6단계에 등록한 값과 글자 단위로 같아야 합니다.** 로컬에서
   실행할 때는 `http://localhost:8501/oauth2callback`으로 바꿔야 합니다
-- **`allowed_emails`가 실제 접근 통제입니다.** Google 로그인은 "이 사람이 그
-  구글 계정의 주인"임만 증명할 뿐, 누구나 로그인 자체는 성공합니다. 이 목록이
-  비어 있으면 앱은 아무도 들여보내지 않고 잠깁니다
+- **사용 대상 설정이 실제 접근 통제입니다.** Google 로그인은 "이 사람이 그
+  구글 계정의 주인"임만 증명할 뿐, 누구나 로그인 자체는 성공합니다. 특정 인원만
+  쓰게 하려면 `allowed_emails`, 방문자 누구나 쓰게 하려면
+  `allow_any_google_account = true`. 둘 다 없으면 앱은 아무도 들여보내지 않고
+  잠깁니다 — 여는 것은 명시적인 결정이어야 하니까요. 어느 쪽이든 인보이스는
+  각자의 Drive에 저장되므로, 열어도 남의 계좌정보를 내가 떠안지 않습니다
 - **Drive 저장을 안 쓸 거면** `expose_tokens`와 `client_kwargs` 두 줄을 빼면
   됩니다. 저장 버튼이 비활성 상태가 되고 나머지는 그대로 동작합니다
 - `.streamlit/secrets.toml`은 `.gitignore`에 들어 있습니다. 커밋하지 마세요

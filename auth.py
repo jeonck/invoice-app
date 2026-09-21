@@ -1,9 +1,17 @@
 """Google sign-in gate for the invoice app.
 
 Authentication is Streamlit's built-in OIDC (``st.login``); this module adds
-the part OIDC does not give you — **an allowlist**. Any Google account in the
-world can complete the sign-in flow, so the email that comes back is checked
-against the addresses configured for this app:
+the part OIDC does not give you — **a decision about who may use the app**.
+Any Google account in the world can complete the sign-in flow, so the email
+that comes back is checked against what this app is configured to admit:
+
+Open to anyone who signs in (a tool offered to visitors, where each person's
+invoices go to their own Drive)::
+
+    [app_auth]
+    allow_any_google_account = true
+
+Or limited to named addresses (a private tool)::
 
     # .streamlit/secrets.toml   (never commit this file)
     [auth]
@@ -18,9 +26,10 @@ against the addresses configured for this app:
     [app_auth]
     allowed_emails = ["you@example.com"]
 
-Both halves must be present. Missing OIDC config, or an empty allowlist,
+Configure exactly one of the two. Missing OIDC config, or neither of these,
 fails closed: the app refuses to render the invoice form rather than serving
-it to whoever arrives.
+it to whoever arrives — opening it up is a decision someone has to make on
+purpose, never the result of a missing setting.
 """
 
 import streamlit as st
@@ -71,12 +80,29 @@ def signed_in_email() -> str:
     return str(_claim("email", "") or "").strip().lower()
 
 
+def open_to_anyone() -> bool:
+    """True when any signed-in Google account may use the app."""
+    try:
+        return st.secrets["app_auth"]["allow_any_google_account"] is True
+    except Exception:
+        return False
+
+
+def access_configured() -> bool:
+    """True when the app has been told who it admits, either way."""
+    return open_to_anyone() or bool(allowed_emails())
+
+
+def is_allowed(email: str) -> bool:
+    return bool(email) and (open_to_anyone() or email in allowed_emails())
+
+
 def current_user():
-    """The signed-in, allowed email — or None."""
+    """The signed-in, admitted email — or None."""
     if not is_signed_in():
         return None
     email = signed_in_email()
-    return email if email and email in allowed_emails() else None
+    return email if is_allowed(email) else None
 
 
 def _email_is_verified() -> bool:
@@ -105,12 +131,16 @@ def require_login(L) -> bool:
         )
         return False
 
-    # OIDC alone would let in any Google account, so an empty allowlist is a
+    # OIDC alone would admit any Google account, so "nothing configured" is a
     # misconfiguration rather than a permissive default.
-    if not allowed_emails():
+    if not access_configured():
         st.error(f"\N{LOCK} {L['login_allowlist_title']}")
         st.markdown(L["login_allowlist_body"])
-        st.code('[app_auth]\nallowed_emails = ["you@example.com"]\n', language="toml")
+        st.code('[app_auth]\n'
+                '# either: open to anyone who signs in\n'
+                'allow_any_google_account = true\n\n'
+                '# or: only these addresses\n'
+                'allowed_emails = ["you@example.com"]\n', language="toml")
         return False
 
     _, middle, _ = st.columns([1, 1.6, 1])
@@ -129,7 +159,7 @@ def require_login(L) -> bool:
             return False
 
         email = signed_in_email()
-        if not email or not _email_is_verified() or email not in allowed_emails():
+        if not email or not _email_is_verified() or not is_allowed(email):
             st.error(L["login_denied"].format(email=email or "?"))
             st.button(f"\N{DOOR} {L['logout']}", on_click=st.logout,
                       use_container_width=True, key="denied_logout_btn")
