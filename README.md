@@ -37,6 +37,17 @@ redirect URI for each place the app runs:
 | Local | `http://localhost:8501/oauth2callback` |
 | Streamlit Cloud | `https://<your-app>.streamlit.app/oauth2callback` |
 
+Then check the app's **publishing status** on the OAuth consent screen
+(**APIs & Services → OAuth consent screen → Audience**). A new client starts in
+**Testing**, where Google refuses everyone who is not listed:
+
+> 403: access_denied — the app is currently being tested and only developer-approved testers can access it
+
+Either add your own address under **Test users**, or press **Publish app**. All
+the scopes this app uses (`openid`, `email`, `profile`, `drive.file`) are
+non-sensitive, so publishing needs no Google verification review. Publishing does
+not widen who can use the app either — `allowed_emails` still decides that.
+
 ### 2. Configure secrets
 
 Put this in `.streamlit/secrets.toml` locally, or in **Settings → Secrets** on
