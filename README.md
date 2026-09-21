@@ -75,24 +75,6 @@ An address is admitted only when Google reports it as verified and it appears
 in `allowed_emails` (matched case-insensitively). Everyone else gets a refusal
 and a sign-out button.
 
-A refused visitor does not have to hit a dead end. Point them at a form and
-the refusal screen grows a **Request access** button, with their address —
-already verified by Google, so it cannot be a typo or someone else's —
-prefilled:
-
-```toml
-[app_auth]
-request_form_url = "https://docs.google.com/forms/d/e/<id>/viewform"
-request_form_email_field = "entry.123456789"   # optional, prefills the address
-```
-
-Only an `https://` link is rendered; anything else is dropped rather than
-shown, and a field name that is not `entry.<digits>` is ignored instead of
-being pasted into the query. Worth remembering what this is, though: a
-request button makes a manual allowlist bearable, it does not scale one. If
-approvals start arriving regularly, `allow_any_google_account` costs the
-operator nothing — each person's invoices go to their own Drive either way.
-
 The sign-in screen shows what the app does and renders a live sample invoice
 below the button, so a first-time visitor can see the output before handing
 over an account — and can read why a Google account is asked for at all. If

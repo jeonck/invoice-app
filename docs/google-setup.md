@@ -137,9 +137,6 @@ client_kwargs = { scope = "openid email profile https://www.googleapis.com/auth/
 [app_auth]
 allowed_emails = ["you@example.com"]       # 실제로 이 앱을 쓸 사람
 
-# (선택) 거부된 방문자가 사용 신청할 수 있게 하려면
-# request_form_url = "https://docs.google.com/forms/d/e/<폼ID>/viewform"
-# request_form_email_field = "entry.123456789"   # 로그인한 주소를 폼에 미리 채움
 # 또는, 위 줄 대신 아래 중 하나:
 # allow_anonymous_use = true               # 로그인 없이 작성·다운로드, 저장/불러오기만 로그인
 # allow_any_google_account = true          # 로그인 필수, 구글 계정이면 누구나

@@ -32,13 +32,6 @@ Or limited to named addresses (a private tool)::
     [app_auth]
     allowed_emails = ["you@example.com"]
 
-A refused visitor can be pointed at a request form, since by then Google has
-already verified who they are::
-
-    [app_auth]
-    request_form_url = "https://docs.google.com/forms/d/e/<id>/viewform"
-    request_form_email_field = "entry.123456789"   # optional, prefills the address
-
 Set exactly one of the three access modes. If ``allow_anonymous_use`` is on it wins over
 the others, so adding it to an app that has an allowlist makes that app
 public — which is the point, but worth knowing before adding it "just to
@@ -47,9 +40,6 @@ refuses to render the invoice form rather than serving it to whoever
 arrives. Opening it up is a decision someone has to make on purpose, never
 the result of a missing setting.
 """
-
-import re
-from urllib.parse import quote
 
 import streamlit as st
 
@@ -129,37 +119,6 @@ def is_allowed(email: str) -> bool:
     # Signing in on a public tool exists to reach the person's own Drive, so
     # there is nothing for an allowlist to protect there.
     return anonymous_use() or open_to_anyone() or email in allowed_emails()
-
-
-def build_request_url(base: str, field: str, email: str) -> str:
-    """The access-request form, with the signed-in address filled in.
-
-    Kept pure so the URL building can be checked directly. Anything that is
-    not an https link is dropped rather than rendered: a broken or hijacked
-    link on the refusal screen is worse than no link at all.
-    """
-    base = str(base or "").strip()
-    if not base.lower().startswith("https://"):
-        return ""
-    field = str(field or "").strip()
-    if not email or not re.fullmatch(r"entry\.\d+", field):
-        return base
-    separator = "&" if "?" in base else "?"
-    return f"{base}{separator}usp=pp_url&{field}={quote(email)}"
-
-
-def request_form_url(email: str = "") -> str:
-    """Where a refused visitor can ask to be let in, or "" if unconfigured."""
-    try:
-        section = st.secrets["app_auth"]
-    except Exception:
-        return ""
-    try:
-        return build_request_url(section.get("request_form_url", ""),
-                                 section.get("request_form_email_field", ""),
-                                 email)
-    except Exception:
-        return ""
 
 
 def begin_sign_in():
@@ -243,13 +202,6 @@ def require_login(L, preview=None) -> bool:
             email = signed_in_email()
             if not email or not _email_is_verified() or not is_allowed(email):
                 st.error(L["login_denied"].format(email=email or "?"))
-                # The address is already verified by Google, so asking for
-                # access is one click and cannot be someone else's address.
-                form = request_form_url(email)
-                if form:
-                    st.link_button(f"\N{ENVELOPE} {L['request_access']}", form,
-                                   use_container_width=True, type="primary")
-                    st.caption(L["request_access_hint"].format(email=email or "?"))
                 st.button(f"\N{DOOR} {L['logout']}", on_click=st.logout,
                           use_container_width=True, key="denied_logout_btn")
                 signed_in = False
