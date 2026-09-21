@@ -23,45 +23,25 @@ configuration, or with an empty allowlist, it refuses to render the invoice
 form and shows what is missing instead. Bank details go into this form, so it
 should never be an open page on the internet.
 
-Note that Google sign-in on its own admits *any* Google account — the allowlist
-is what limits the app to you, so both halves below are required.
+Google sign-in on its own admits *any* Google account — `allowed_emails` is
+what limits the app to you, so both halves are required.
 
-### 1. Create an OAuth client
-
-In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
-**Create credentials → OAuth client ID → Web application**, and add the
-redirect URI for each place the app runs:
-
-| Where | Authorized redirect URI |
-| --- | --- |
-| Local | `http://localhost:8501/oauth2callback` |
-| Streamlit Cloud | `https://<your-app>.streamlit.app/oauth2callback` |
-
-Then check the app's **publishing status** on the OAuth consent screen
-(**APIs & Services → OAuth consent screen → Audience**). A new client starts in
-**Testing**, where Google refuses everyone who is not listed:
-
-> 403: access_denied — the app is currently being tested and only developer-approved testers can access it
-
-Either add your own address under **Test users**, or press **Publish app**. All
-the scopes this app uses (`openid`, `email`, `profile`, `drive.file`) are
-non-sensitive, so publishing needs no Google verification review. Publishing does
-not widen who can use the app either — `allowed_emails` still decides that.
-
-### 2. Configure secrets
-
-Put this in `.streamlit/secrets.toml` locally, or in **Settings → Secrets** on
-Streamlit Community Cloud. The file is gitignored — keep it that way.
+**[docs/google-setup.md](docs/google-setup.md) walks through the whole setup**
+(in Korean): the OAuth client, the consent screen, the `403: access_denied`
+that a new client always hits, the secrets, and Drive saving. The summary:
 
 ```toml
+# .streamlit/secrets.toml — or Settings -> Secrets on Streamlit Cloud
 [auth]
-redirect_uri = "http://localhost:8501/oauth2callback"
-cookie_secret = "<a long random string>"   # e.g. python -c "import secrets; print(secrets.token_urlsafe(32))"
+redirect_uri = "https://<your-app>.streamlit.app/oauth2callback"
+cookie_secret = "<a long random string>"
+expose_tokens = ["access"]                 # only needed for Drive saving
 
 [auth.google]
 client_id = "<...>.apps.googleusercontent.com"
 client_secret = "<...>"
 server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+client_kwargs = { scope = "openid email profile https://www.googleapis.com/auth/drive.file" }
 
 [app_auth]
 allowed_emails = ["you@example.com"]       # who may actually use the app
@@ -73,35 +53,29 @@ and a sign-out button.
 
 Streamlit keeps the identity in a signed cookie, so a refresh does not sign you
 out. Signing out clears the cookie **and** wipes the invoice form — bank details
-included — from the session.
-
-The app's own settings live in `[app_auth]` so they cannot collide with the
-`[auth]` section that Streamlit's OIDC support owns.
+included — from the session. The app's own settings live in `[app_auth]` so they
+cannot collide with the `[auth]` section that Streamlit's OIDC support owns.
 
 ## Saving invoices to Google Drive (optional)
 
-With two more settings, a generated invoice can be saved to **the signed-in
-person's own Drive** — `Invoices/<year>/INV-....pdf` plus `INV-....json`, the
-form data, so an invoice can be loaded back and reissued later. Saving the same
-invoice number again replaces those two files instead of piling up copies.
+A generated invoice can be saved to **the signed-in person's own Drive** —
+`Invoices/<year>/INV-....pdf` plus `INV-....json`, the form data, so an invoice
+can be loaded back and reissued later. Saving the same invoice number again
+replaces those two files instead of piling up copies.
 
-```toml
-[auth]
-expose_tokens = ["access"]                 # alongside redirect_uri / cookie_secret
+It needs the two lines marked above (`expose_tokens` and the `drive.file`
+scope) and the Google Drive API enabled on the same project — see
+[docs/google-setup.md](docs/google-setup.md). Adding the scope to an existing
+setup requires signing out and back in, since the old cookie carries a token
+issued for the old scopes.
 
-[auth.google]
-client_kwargs = { scope = "openid email profile https://www.googleapis.com/auth/drive.file" }
-```
-
-Enable the **Google Drive API** for the same project in the Cloud Console. The
-`drive.file` scope is the narrow one: this app can only ever see files it created
-itself, never the rest of the Drive.
-
-The app stores **no credential of its own** — it borrows the access token from
-the sign-in that already happened, so the files belong to the person who made
-them and access can be revoked from their Google account settings. That token is
-short-lived and Streamlit does not refresh it, so a long-open session may need a
-fresh sign-in before saving; the app says so when that happens.
+`drive.file` is the narrow scope: this app can only ever see files it created
+itself, never the rest of the Drive. The app stores **no credential of its
+own** — it borrows the access token from the sign-in that already happened, so
+the files belong to the person who made them and access can be revoked from
+their Google account. That token is short-lived and Streamlit does not refresh
+it, so a long-open session may need a fresh sign-in before saving; the app says
+so when that happens.
 
 Without these settings the save button stays disabled and the app works exactly
 as before — generate and download.
