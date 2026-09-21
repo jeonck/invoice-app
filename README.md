@@ -103,8 +103,10 @@ anyone through a pointless sign-in.
 
 ## Drafts
 
-**Save draft (file)** downloads the form as JSON and **Load a draft file** puts
-it back. No account needed, so a visitor who is not signing in can still stop
+Folded into **Drafts · pick up later** in the create tab, since most sessions
+never need it: **Save draft (file)** downloads the form as JSON and **Load a
+draft file** puts it back. It opens by itself when a file fails to load, so the
+reason is not hidden behind a collapsed panel. No account needed, so a visitor who is not signing in can still stop
 and resume, and it survives anything that reloads the page — an expired token, a
 stray refresh, a closed laptop.
 

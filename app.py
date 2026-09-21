@@ -235,6 +235,7 @@ LABELS = {
         "drive_save": "Google Drive에 저장",
         "drive_list": "Drive에서 불러오기",
         "draft_save": "임시저장 (파일)",
+        "draft_section": "임시저장 · 이어서 작업하기",
         "draft_load": "임시저장 파일 불러오기",
         "draft_loaded": "임시저장 파일을 불러왔습니다.",
         "draft_hint": ("작성 중인 내용을 JSON 파일로 내려받습니다. 로그인 없이도 쓸 수 있고, "
@@ -353,6 +354,7 @@ LABELS = {
         "drive_save": "Save to Google Drive",
         "drive_list": "Open from Drive",
         "draft_save": "Save draft (file)",
+        "draft_section": "Drafts · pick up later",
         "draft_load": "Load a draft file",
         "draft_loaded": "Draft loaded.",
         "draft_hint": ("Downloads what you have typed as a JSON file. It works without "
@@ -1178,24 +1180,26 @@ with tab_create:
     with tb3:
         st.caption(L["form_hint"])
 
-    # --- Keep working later: a draft file, and Drive for signed-in people ---
-    dc1, dc2 = st.columns([1.2, 2.4], vertical_alignment="bottom")
-    with dc1:
-        st.download_button(
-            f"📝 {L['draft_save']}",
-            data=json.dumps(current_form_snapshot(), ensure_ascii=False,
-                            indent=2).encode("utf-8"),
-            file_name=safe_draft_filename(st.session_state.get("invoice_no", "")),
-            mime="application/json",
-            key="draft_download",
-            use_container_width=True,
-            help=L["draft_hint"],
-        )
-    with dc2:
-        st.file_uploader(L["draft_load"], type="json", key="draft_upload",
-                         on_change=load_draft_file, label_visibility="collapsed")
-    if st.session_state.get("draft_error"):
-        st.caption(f"⚠️ {L['draft_unreadable']}")
+    # --- Keep working later: folded away, since most sessions never need it ---
+    draft_failed = bool(st.session_state.get("draft_error"))
+    with st.expander(f"📝 {L['draft_section']}", expanded=draft_failed):
+        st.caption(L["draft_hint"])
+        dc1, dc2 = st.columns([1.2, 2.4], vertical_alignment="bottom")
+        with dc1:
+            st.download_button(
+                f"📝 {L['draft_save']}",
+                data=json.dumps(current_form_snapshot(), ensure_ascii=False,
+                                indent=2).encode("utf-8"),
+                file_name=safe_draft_filename(st.session_state.get("invoice_no", "")),
+                mime="application/json",
+                key="draft_download",
+                use_container_width=True,
+            )
+        with dc2:
+            st.file_uploader(L["draft_load"], type="json", key="draft_upload",
+                             on_change=load_draft_file, label_visibility="collapsed")
+        if draft_failed:
+            st.caption(f"⚠️ {L['draft_unreadable']}")
 
     # --- Reopen a past invoice: the reason the form data is saved at all ---
     if drive.is_configured():
